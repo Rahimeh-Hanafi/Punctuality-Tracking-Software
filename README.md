@@ -19,17 +19,32 @@ An application to process employee entry-exit logs, edit work schedules, and gen
 
 ## Project Structure
 Punctuality-Tracking-Software/
+
 ├── main.py 
+
 ├── requirements.txt # Python dependencies
+
 ├── sample_data/ # Sample TXT files for testing
+
 ├── ui/ # Tkinter UI components
+
 │ ├── init.py
+
 │ └── app.py
+
 ├── core/ # Core logic modules
+
 │ ├── init.py
+
 │ ├── processor.py # File processing & CSV export
+
 │ ├── scheduler.py # Work schedule editor
+
 │ └── reports.py # Late/Early report generation
+
 └── resources/ # Constants and assets
-├── init.py
-└── config.py # Default entry/exit times, floating, etc.
+
+│ ├── init.py
+
+│ └── config.py # Default entry/exit times, floating, etc.
+
