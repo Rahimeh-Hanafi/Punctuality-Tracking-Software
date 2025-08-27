@@ -1,8 +1,8 @@
 import tkinter as tk
-from tkinter import Toplevel, Label, Frame, Button, Canvas, Scrollbar, VERTICAL, BooleanVar, Checkbutton
+from tkinter import Toplevel, Label, Frame, Button, Canvas, Scrollbar, VERTICAL, BooleanVar, Checkbutton, messagebox
 from tkinter.ttk import Combobox
-from tkinter import messagebox
 from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED
+
 
 class WorkScheduleEditor:
     def __init__(self, app):
@@ -36,7 +36,7 @@ class WorkScheduleEditor:
         self.combos = {}
         times_entry = [f"{h:02d}:{m:02d}" for h in range(7, 11) for m in (0, 30) if not (h == 10 and m > 30)]
         times_exit = [f"{h:02d}:{m:02d}" for h in range(16, 19) for m in (0, 30) if not (h == 18 and m > 30)]
-        floating_opts = ["0.5", "1.0", "1.5"]
+        floating_opts = ["0.0", "0.5", "1.0"]
 
         for date in filtered_dates:
             frame = Frame(content_frame)
@@ -57,7 +57,7 @@ class WorkScheduleEditor:
             cb_floating.grid(row=0, column=3, padx=5)
 
             late_var = BooleanVar(value=self.app.work_schedules.get(date, {}).get("late_allowed", DEFAULT_LATE_ALLOWED))
-            chk = Checkbutton(frame, text="10min late OK", variable=late_var)
+            chk = Checkbutton(frame, text="10 min late OK", variable=late_var)
             chk.grid(row=0, column=4, padx=5)
 
             self.combos[date] = (cb_entry, cb_exit, cb_floating, late_var)

@@ -1,61 +1,101 @@
-from tkinter import Toplevel, Label, Text, END, messagebox
-from datetime import datetime, timedelta
-from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED
+import csv
+import tkinter as tk
+from tkinter import messagebox, filedialog
 
-class LateEarlyReport:
-    def __init__(self, app):
-        self.app = app
-        pid = self.app.selected_id.get()
-        if not pid:
-            messagebox.showinfo("Info", "Select an ID first.")
-            return
 
-        filtered_sessions = [s for s in self.app.sessions if s[0] == pid]
-        late_sessions = []
+class ReportGenerator:
+    def __init__(self, processor):
+        self.processor = processor
 
-        for s in filtered_sessions:
-            date, entry, exit = s[1], s[2], s[3]
-            try:
-                entry_dt = datetime.strptime(entry, "%H:%M")
-                exit_dt = datetime.strptime(exit, "%H:%M")
-            except:
-                continue
+    def save_report(self, file_path: str, late_sessions_with_reasons):
+        """Save late/early report with reasons to CSV."""
+        with open(file_path, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["ID", "Date", "Type", "Time", "Duration (min)", "Reason"])
+            writer.writerows(late_sessions_with_reasons)
 
-            sched = self.app.work_schedules.get(date, {
-                "entry": DEFAULT_ENTRY,
-                "exit": DEFAULT_EXIT,
-                "floating": DEFAULT_FLOATING,
-                "late_allowed": DEFAULT_LATE_ALLOWED            
-            })
-            start_time = datetime.strptime(sched["entry"], "%H:%M")
-            end_time = datetime.strptime(sched["exit"], "%H:%M")
-
-            if sched["late_allowed"]:
-                latest_entry = start_time + timedelta(minutes=10)
-            else:
-                latest_entry = start_time
-
-            expected_end = end_time + timedelta(minutes=int(sched["floating"] * 60))
-
-            if entry_dt > latest_entry:
-                minutes_late = (entry_dt - latest_entry).seconds // 60
-                late_sessions.append((pid, date, "Late Entry", entry, minutes_late))
-
-            if exit_dt < expected_end:
-                minutes_early = (expected_end - exit_dt).seconds // 60
-                late_sessions.append((pid, date, "Early Exit", exit, minutes_early))
-
+    def open_late_early_report_window(self, root, pid: str):
+        """Tkinter window for late/early analysis with reason selection & export."""
+        late_sessions = self.processor.find_late_early(pid)
         if not late_sessions:
-            messagebox.showinfo("Result", "No late entries or early exits found for the selected ID.")
+            messagebox.showinfo("Result", "No late/early entries found.")
             return
 
-        result_win = Toplevel()
+        result_win = tk.Toplevel(root)
         result_win.title("Late/Early Report")
-        result_win.geometry("600x400")
+        result_win.geometry("600x500")
 
-        Label(result_win, text=f"Late/Early records for ID: {pid}", font=("Segoe UI", 12, "bold")).pack(pady=10)
+        tk.Label(result_win, text=f"Late/Early records for ID: {pid}", font=("Segoe UI", 12, "bold")).pack(pady=10)
 
-        output = Text(result_win, wrap='word', font=('Consolas', 11))
-        output.pack(padx=10, pady=10, fill='both', expand=True)
+        container = tk.Frame(result_win)
+        container.pack(fill='both', expand=True)
+
+        canvas = tk.Canvas(container)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        reason_vars = []
         for r in late_sessions:
-            output.insert(END, f"Date: {r[1]} | {r[2]} at {r[3]} | {r[4]} min\n")
+            pid_r, date, status, time, minutes = r
+            row_frame = tk.Frame(scrollable_frame)
+            row_frame.pack(anchor='w', pady=3, padx=5, fill='x')
+
+            tk.Label(row_frame, text=f"{pid_r} | {date} | {status} at {time} | {minutes} min",
+                     width=55, anchor='w').pack(side='left')
+
+            var = tk.StringVar()
+            var.set("Select Reason")
+            dropdown = tk.OptionMenu(row_frame, var, "Impermissible", "Announced", "Other")
+            dropdown.pack(side='right')
+            reason_vars.append((var, minutes, pid_r, date, status, time))
+
+        def calculate_times():
+            for var, *_ in reason_vars:
+                if var.get() == "Select Reason":
+                    messagebox.showerror("Error", "Please select a reason for all records before calculating.")
+                    return
+
+            total_impermissible = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Impermissible")
+            total_announced = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Announced")
+
+            messagebox.showinfo("Totals",
+                                f"Total Impermissible time: {total_impermissible} minutes\n"
+                                f"Total Announced time: {total_announced} minutes")
+
+        def save_report_ui():
+            for var, *_ in reason_vars:
+                if var.get() == "Select Reason":
+                    messagebox.showerror("Error", "Please select a reason for all records before saving.")
+                    return
+
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                title="Save report as"
+            )
+            if not file_path:
+                return
+
+            rows = [(pid_r, date, status, time, minutes, var.get())
+                    for var, minutes, pid_r, date, status, time in reason_vars]
+            self.save_report(file_path, rows)
+            messagebox.showinfo("Saved", f"Report saved successfully to {file_path}")
+
+        btn_frame = tk.Frame(result_win)
+        btn_frame.pack(pady=10)
+
+        tk.Button(btn_frame, text="Calculate Times", command=calculate_times,
+                  bg="darkblue", fg="white").pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Save Report", command=save_report_ui,
+                  bg="green", fg="white").pack(side='left', padx=5)
