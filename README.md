@@ -32,6 +32,12 @@ Punctuality-Tracking-Software/
 
 │ └── app.py
 
+├── tests/ # unit tests
+
+│ ├── init.py
+
+│ └── test_core.py 
+
 ├── core/ # Core logic modules
 
 │ ├── init.py
