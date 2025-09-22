@@ -8,10 +8,13 @@ class ReportGenerator:
         self.processor = processor
 
     def save_report(self, file_path: str, late_sessions_with_reasons):
-        """Save late/early report with reasons to CSV."""
+        """Save late/early report with reasons to CSV including total columns."""
         with open(file_path, mode='w', newline='') as file:
             writer = csv.writer(file)
-            writer.writerow(["ID", "Date", "Type", "Time", "Duration (min)", "Reason"])
+            writer.writerow([
+                "ID", "Date", "Type", "Time", "Duration (min)", "Reason",
+                "Total Impermissible", "Total Announced", "Total Other"
+            ])
             writer.writerows(late_sessions_with_reasons)
 
     def open_late_early_report_window(self, root, pid: str):
@@ -89,6 +92,18 @@ class ReportGenerator:
 
             rows = [(pid_r, date, status, time, minutes, var.get())
                     for var, minutes, pid_r, date, status, time in reason_vars]
+            
+            # Calculate totals for each reason
+            total_impermissible = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Impermissible")
+            total_announced = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Announced")
+            total_other = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Other")
+            # Prepare rows with extra columns for totals
+            rows = [
+                (pid_r, date, status, time, minutes, var.get(),
+                total_impermissible, total_announced, total_other)
+                for var, minutes, pid_r, date, status, time in reason_vars
+            ]
+
             self.save_report(file_path, rows)
             messagebox.showinfo("Saved", f"Report saved successfully to {file_path}")
 
