@@ -29,7 +29,8 @@ class LogProcessor:
                     reason TEXT,       -- Impermissible / Announced / Other
                     total_impermissible INTEGER DEFAULT 0,
                     total_announced INTEGER DEFAULT 0,
-                    total_other INTEGER DEFAULT 0
+                    total_other INTEGER DEFAULT 0,
+                    UNIQUE(id, date, status)
                 )
             """)
             conn.commit()
@@ -64,14 +65,15 @@ class LogProcessor:
                     self.sessions.append([person_id, date, sorted_times[0], sorted_times[-1], "fallback"])
 
     def _save_sessions_to_db(self):
-        """Save sessions into SQLite database."""
+        """Save sessions into SQLite database, replacing duplicates."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             for s in self.sessions:
+                pid, date, entry, exit_, status = s
                 cursor.execute("""
-                    INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
+                    INSERT OR REPLACE INTO sessions (id, date, entry, exit, status, duration, mode, reason)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (s[0], s[1], s[2], s[3], s[4], 0, None, None))
+                """, (pid, date, entry, exit_, status, 0, None, None))
             conn.commit()
     def get_fallback_sessions(self, pid: str):
         """Return fallback sessions for a person ID."""
@@ -89,7 +91,7 @@ class LogProcessor:
                 cursor.execute("""
                     UPDATE sessions
                     SET entry=?, exit=?
-                    WHERE id=? AND date=? AND mode=?
+                    WHERE id=? AND date=? AND status=?
                 """, (entry, exit_, s[0], s[1], s[4]))
             conn.commit()
 
@@ -100,15 +102,15 @@ class LogProcessor:
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            # Insert all sessions (if not already in DB)
-            for s in sessions:
-                pid_s, date, entry_str, exit_str, status = s
-                cursor.execute("""
-                    INSERT OR IGNORE INTO sessions
-                    (id, date, entry, exit, status, duration, mode, reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (pid_s, date, entry_str, exit_str, status, 0, None, None))
-            conn.commit()
+            # # Insert all sessions (if not already in DB)
+            # for s in sessions:
+            #     pid_s, date, entry_str, exit_str, status = s
+            #     cursor.execute("""
+            #         INSERT OR REPLACE INTO sessions
+            #         (id, date, entry, exit, status, duration, mode, reason)
+            #         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            #     """, (pid_s, date, entry_str, exit_str, status, 0, None, None))
+            # conn.commit()
 
             for s in sessions:
                 pid_s, date, entry_str, exit_str, status = s

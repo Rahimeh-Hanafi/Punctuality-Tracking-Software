@@ -135,6 +135,22 @@ class ReportGenerator:
             ]
 
             self.save_report(file_path, rows)
+            # ✅ Also UPSERT into database
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                for row in rows:
+                    pid_r, date, entry, exit, status, minutes, mode, reason, *_ = row
+                    cursor.execute("""
+                        INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id, date, status) DO UPDATE SET
+                            entry=excluded.entry,
+                            exit=excluded.exit,
+                            duration=excluded.duration,
+                            mode=excluded.mode,
+                            reason=excluded.reason
+                    """, (pid_r, date, entry, exit, status, minutes, mode, reason))
+                conn.commit()
             messagebox.showinfo("Saved", f"Report saved successfully to {file_path}")
 
         btn_frame = tk.Frame(result_win)
