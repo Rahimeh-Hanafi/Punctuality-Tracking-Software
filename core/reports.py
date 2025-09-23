@@ -1,6 +1,7 @@
 import csv
 import tkinter as tk
 from tkinter import messagebox, filedialog
+import sqlite3
 
 
 class ReportGenerator:
@@ -12,7 +13,7 @@ class ReportGenerator:
         with open(file_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow([
-                "ID", "Date", "Type", "Time", "Duration (min)", "Reason",
+                "ID", "Date", "Entry", "Exit", "Status", "Duration (min)", "Mode", "Reason",
                 "Total Impermissible", "Total Announced", "Total Other"
             ])
             writer.writerows(late_sessions_with_reasons)
@@ -50,18 +51,49 @@ class ReportGenerator:
 
         reason_vars = []
         for r in late_sessions:
-            pid_r, date, status, time, minutes = r
+            pid_r, date, entry, exit, status, minutes, mode = r
             row_frame = tk.Frame(scrollable_frame)
             row_frame.pack(anchor='w', pady=3, padx=5, fill='x')
 
-            tk.Label(row_frame, text=f"{pid_r} | {date} | {status} at {time} | {minutes} min",
-                     width=55, anchor='w').pack(side='left')
+            tk.Label(
+                row_frame,
+                text=f"{pid_r} | {date} | {entry} → {exit} | {status} | {minutes} min | {mode}",
+                width=65,
+                anchor='w'
+            ).pack(side='left')
 
             var = tk.StringVar()
             var.set("Select Reason")
+            
+            # Callback to save immediately
+            def on_reason_selected(*args, var=var, pid_r=pid_r, date=date, entry=entry, exit=exit, status=status, mode=mode):
+                selected_reason = var.get()
+                if selected_reason == "Select Reason":
+                    return
+                with sqlite3.connect(self.processor.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE sessions
+                        SET reason = ?
+                        WHERE id = ? AND date = ? AND entry = ? AND exit = ? AND status = ? AND mode = ?
+                    """, (
+                        selected_reason,
+                        pid_r,
+                        date,
+                        entry,
+                        exit,
+                        status,
+                        mode
+                    ))
+                    conn.commit()
+
+            # Attach trace to trigger DB update on selection
+            var.trace_add("write", on_reason_selected)
             dropdown = tk.OptionMenu(row_frame, var, "Impermissible", "Announced", "Other")
             dropdown.pack(side='right')
-            reason_vars.append((var, minutes, pid_r, date, status, time))
+
+            # Now include mode too
+            reason_vars.append((var, minutes, pid_r, date, entry, exit, status, mode))
 
         def calculate_times():
             for var, *_ in reason_vars:
@@ -89,19 +121,17 @@ class ReportGenerator:
             )
             if not file_path:
                 return
-
-            rows = [(pid_r, date, status, time, minutes, var.get())
-                    for var, minutes, pid_r, date, status, time in reason_vars]
             
             # Calculate totals for each reason
             total_impermissible = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Impermissible")
             total_announced = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Announced")
             total_other = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Other")
+           
             # Prepare rows with extra columns for totals
             rows = [
-                (pid_r, date, status, time, minutes, var.get(),
+                (pid_r, date, entry, exit, status, minutes, mode, var.get(),
                 total_impermissible, total_announced, total_other)
-                for var, minutes, pid_r, date, status, time in reason_vars
+                for var, minutes, pid_r, date, entry, exit, status, mode in reason_vars
             ]
 
             self.save_report(file_path, rows)
