@@ -19,6 +19,7 @@ class LogProcessor:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
+                    session_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     id TEXT,
                     date TEXT,
                     entry TEXT,
@@ -29,8 +30,7 @@ class LogProcessor:
                     reason TEXT,       -- Impermissible / Announced / Other
                     total_impermissible INTEGER DEFAULT 0,
                     total_announced INTEGER DEFAULT 0,
-                    total_other INTEGER DEFAULT 0,
-                    UNIQUE(id, date, status)
+                    total_other INTEGER DEFAULT 0
                 )
             """)
             conn.commit()
@@ -71,7 +71,7 @@ class LogProcessor:
             for s in self.sessions:
                 pid, date, entry, exit_, status = s
                 cursor.execute("""
-                    INSERT OR REPLACE INTO sessions (id, date, entry, exit, status, duration, mode, reason)
+                    INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (pid, date, entry, exit_, status, 0, None, None))
             conn.commit()
@@ -102,14 +102,14 @@ class LogProcessor:
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            # # Insert all sessions (if not already in DB)
+            # # First, update all existing sessions with current entry/exit
             # for s in sessions:
             #     pid_s, date, entry_str, exit_str, status = s
             #     cursor.execute("""
-            #         INSERT OR REPLACE INTO sessions
-            #         (id, date, entry, exit, status, duration, mode, reason)
-            #         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            #     """, (pid_s, date, entry_str, exit_str, status, 0, None, None))
+            #         UPDATE sessions
+            #         SET entry = ?, exit = ?
+            #         WHERE id = ? AND date = ? AND status = ?
+            #     """, (entry_str, exit_str, pid_s, date, status))
             # conn.commit()
 
             for s in sessions:
@@ -143,11 +143,12 @@ class LogProcessor:
                 if entry_dt > latest_allowed_entry:
                     minutes_late = (entry_dt - latest_allowed_entry).seconds // 60
                     late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
-                    cursor.execute("""
-                        UPDATE sessions
-                        SET duration = ?, mode = ?
-                        WHERE id=? AND date=? AND entry=? AND exit=? AND status=?
-                    """, (minutes_late, "Late Entry", pid_s, date, entry_str, exit_str, status))
+                    # # Always just update existing session
+                    # cursor.execute("""
+                    #     UPDATE sessions
+                    #     SET duration = ?, mode = ?
+                    #     WHERE id=? AND date=? AND entry=? AND exit=? AND status=?
+                    # """, (minutes_late, "Late Entry", pid_s, date, entry_str, exit_str, status))
                     # Not allowed → end time is scheduled exit
                     allowed_exit = scheduled_exit + timedelta(minutes=float_minutes)
                 else:
@@ -159,13 +160,29 @@ class LogProcessor:
                 if exit_dt < allowed_exit:
                     minutes_early = (allowed_exit - exit_dt).seconds // 60
                     late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
-                    cursor.execute("""
-                        UPDATE sessions
-                        SET duration = ?, mode = ?
-                        WHERE id=? AND date=? AND entry=? AND exit=? AND status=?
-                    """, (minutes_early, "Early Exit", pid_s, date, entry_str, exit_str, status))
+                    # # Check if a Late Entry exists for this ID/date
+                    # cursor.execute("""
+                    #     SELECT 1 FROM sessions
+                    #     WHERE id = ? AND date = ? AND status = ? AND mode = 'Late Entry'
+                    # """, (pid_s, date, status))
+                    # late_exists = cursor.fetchone()
+
+                    # if late_exists:
+                    #     # Insert a new Early Exit row
+                    #     cursor.execute("""
+                    #         INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
+                    #         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    #     """, (pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit", None))
+                    # else:
+                    #     # Update existing session (no Late Entry) with Early Exit duration
+                    #     cursor.execute("""
+                    #         UPDATE sessions
+                    #         SET duration = ?, mode = ?
+                    #         WHERE id=? AND date=? AND entry=? AND exit=? AND status=?
+                    #     """, (minutes_early, "Early Exit", pid_s, date, entry_str, exit_str, status))
 
             conn.commit()
+
 
         return late_sessions
 

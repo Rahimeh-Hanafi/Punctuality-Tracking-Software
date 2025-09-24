@@ -135,22 +135,33 @@ class ReportGenerator:
             ]
 
             self.save_report(file_path, rows)
-            # ✅ Also UPSERT into database
-            with sqlite3.connect(self.db_path) as conn:
+            # --- Save reasons to database ---
+            with sqlite3.connect(self.processor.db_path) as conn:
                 cursor = conn.cursor()
-                for row in rows:
-                    pid_r, date, entry, exit, status, minutes, mode, reason, *_ = row
+
+                # Get all unique (id, date) pairs from reason_vars
+                unique_keys = {(pid_r, date) for _, _, pid_r, date, *_ in reason_vars}
+
+                # Delete existing rows for those id+date combos
+                for pid_r, date in unique_keys:
+                    cursor.execute("DELETE FROM sessions WHERE id = ? AND date = ?", (pid_r, date))
+
+                # Insert fresh rows
+                for var, minutes, pid_r, date, entry, exit, status, mode in reason_vars:
                     cursor.execute("""
-                        INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(id, date, status) DO UPDATE SET
-                            entry=excluded.entry,
-                            exit=excluded.exit,
-                            duration=excluded.duration,
-                            mode=excluded.mode,
-                            reason=excluded.reason
-                    """, (pid_r, date, entry, exit, status, minutes, mode, reason))
+                        INSERT INTO sessions (
+                            id, date, entry, exit, status, duration, mode, reason,
+                            total_impermissible, total_announced, total_other
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        pid_r, date, entry, exit, status, minutes, mode, var.get(),
+                        total_impermissible, total_announced, total_other
+                    ))
+
                 conn.commit()
+
+            # -------------------------------
             messagebox.showinfo("Saved", f"Report saved successfully to {file_path}")
 
         btn_frame = tk.Frame(result_win)
