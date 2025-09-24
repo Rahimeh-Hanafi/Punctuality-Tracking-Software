@@ -100,88 +100,47 @@ class LogProcessor:
         late_sessions = []
         sessions = [s for s in self.sessions if s[0] == pid]
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            # # First, update all existing sessions with current entry/exit
-            # for s in sessions:
-            #     pid_s, date, entry_str, exit_str, status = s
-            #     cursor.execute("""
-            #         UPDATE sessions
-            #         SET entry = ?, exit = ?
-            #         WHERE id = ? AND date = ? AND status = ?
-            #     """, (entry_str, exit_str, pid_s, date, status))
-            # conn.commit()
+        for s in sessions:
+            pid_s, date, entry_str, exit_str, status = s
 
-            for s in sessions:
-                pid_s, date, entry_str, exit_str, status = s
+            # Skip invalid times
+            try:
+                entry_dt = datetime.strptime(entry_str, "%H:%M")
+                exit_dt = datetime.strptime(exit_str, "%H:%M")
+            except ValueError:
+                continue
 
-                # Skip invalid times
-                try:
-                    entry_dt = datetime.strptime(entry_str, "%H:%M")
-                    exit_dt = datetime.strptime(exit_str, "%H:%M")
-                except ValueError:
-                    continue
+            # Get the scheduled times for this date
+            schedule = self.work_schedules.get(date, {})
+            scheduled_entry_str = schedule.get("entry", DEFAULT_ENTRY)        # "07:30"
+            scheduled_exit_str = schedule.get("exit", DEFAULT_EXIT)           # "16:30"
+            floating = schedule.get("floating", DEFAULT_FLOATING)             # 1.0 hour
+            late_allowed = schedule.get("late_allowed", DEFAULT_LATE_ALLOWED) # False
 
-                # Get the scheduled times for this date
-                schedule = self.work_schedules.get(date, {})
-                scheduled_entry_str = schedule.get("entry", DEFAULT_ENTRY)        # "07:30"
-                scheduled_exit_str = schedule.get("exit", DEFAULT_EXIT)           # "16:30"
-                floating = schedule.get("floating", DEFAULT_FLOATING)             # 1.0 hour
-                late_allowed = schedule.get("late_allowed", DEFAULT_LATE_ALLOWED) # False
+            scheduled_entry = datetime.strptime(scheduled_entry_str, "%H:%M")
+            scheduled_exit = datetime.strptime(scheduled_exit_str, "%H:%M")
+            float_minutes = int(floating * 60)
 
-                scheduled_entry = datetime.strptime(scheduled_entry_str, "%H:%M")
-                scheduled_exit = datetime.strptime(scheduled_exit_str, "%H:%M")
-                float_minutes = int(floating * 60)
+            # Allowed entry window
+            if late_allowed:
+                latest_allowed_entry = scheduled_entry + timedelta(minutes=10 + float_minutes)
+            else:
+                latest_allowed_entry = scheduled_entry + timedelta(minutes=float_minutes)
 
-                # Allowed entry window
-                if late_allowed:
-                    latest_allowed_entry = scheduled_entry + timedelta(minutes=10 + float_minutes)
-                else:
-                    latest_allowed_entry = scheduled_entry + timedelta(minutes=float_minutes)
+            # Check late entry
+            if entry_dt > latest_allowed_entry:
+                minutes_late = (entry_dt - latest_allowed_entry).seconds // 60
+                late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
+                allowed_exit = scheduled_exit + timedelta(minutes=float_minutes)
+            else:
+                # Allowed entry → allowed exit time is scheduled_exit + (entry_dt - scheduled_entry)
+                delta_entry = entry_dt - scheduled_entry
+                allowed_exit = scheduled_exit + delta_entry
 
-                # Check late entry
-                if entry_dt > latest_allowed_entry:
-                    minutes_late = (entry_dt - latest_allowed_entry).seconds // 60
-                    late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
-                    # # Always just update existing session
-                    # cursor.execute("""
-                    #     UPDATE sessions
-                    #     SET duration = ?, mode = ?
-                    #     WHERE id=? AND date=? AND entry=? AND exit=? AND status=?
-                    # """, (minutes_late, "Late Entry", pid_s, date, entry_str, exit_str, status))
-                    # Not allowed → end time is scheduled exit
-                    allowed_exit = scheduled_exit + timedelta(minutes=float_minutes)
-                else:
-                    # Allowed entry → allowed exit time is scheduled_exit + (entry_dt - scheduled_entry)
-                    delta_entry = entry_dt - scheduled_entry
-                    allowed_exit = scheduled_exit + delta_entry
-
-                # Check early exit
-                if exit_dt < allowed_exit:
-                    minutes_early = (allowed_exit - exit_dt).seconds // 60
-                    late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
-                    # # Check if a Late Entry exists for this ID/date
-                    # cursor.execute("""
-                    #     SELECT 1 FROM sessions
-                    #     WHERE id = ? AND date = ? AND status = ? AND mode = 'Late Entry'
-                    # """, (pid_s, date, status))
-                    # late_exists = cursor.fetchone()
-
-                    # if late_exists:
-                    #     # Insert a new Early Exit row
-                    #     cursor.execute("""
-                    #         INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
-                    #         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    #     """, (pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit", None))
-                    # else:
-                    #     # Update existing session (no Late Entry) with Early Exit duration
-                    #     cursor.execute("""
-                    #         UPDATE sessions
-                    #         SET duration = ?, mode = ?
-                    #         WHERE id=? AND date=? AND entry=? AND exit=? AND status=?
-                    #     """, (minutes_early, "Early Exit", pid_s, date, entry_str, exit_str, status))
-
-            conn.commit()
+            # Check early exit
+            if exit_dt < allowed_exit:
+                minutes_early = (allowed_exit - exit_dt).seconds // 60
+                late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
 
 
         return late_sessions
