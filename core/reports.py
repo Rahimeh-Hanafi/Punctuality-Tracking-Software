@@ -139,12 +139,15 @@ class ReportGenerator:
             with sqlite3.connect(self.processor.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Get all unique (id, date) pairs from reason_vars
-                unique_keys = {(pid_r, date) for _, _, pid_r, date, *_ in reason_vars}
+                # Get all unique (id, date, entry, exit) tuples from reason_vars
+                unique_keys = {(pid_r, date, entry, exit) for _, _, pid_r, date, entry, exit, *_ in reason_vars}
 
-                # Delete existing rows for those id+date combos
-                for pid_r, date in unique_keys:
-                    cursor.execute("DELETE FROM sessions WHERE id = ? AND date = ?", (pid_r, date))
+                # Delete existing rows for those id+date+entry+exit combos
+                for pid_r, date, entry, exit in unique_keys:
+                    cursor.execute(
+                        "DELETE FROM sessions WHERE id = ? AND date = ? AND entry = ? AND exit = ?",
+                        (pid_r, date, entry, exit)
+                    )
 
                 # Insert fresh rows
                 for var, minutes, pid_r, date, entry, exit, status, mode in reason_vars:
