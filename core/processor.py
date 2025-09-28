@@ -26,7 +26,7 @@ class LogProcessor:
                     exit TEXT,
                     status TEXT,       -- Paired / Fallback
                     duration INTEGER,
-                    mode TEXT,         -- Late Entry / Early Exit
+                    mode TEXT,         -- Late Entry / Early Exit / Leave
                     reason TEXT,       -- Impermissible / Announced / Other
                     total_impermissible INTEGER DEFAULT 0,
                     total_announced INTEGER DEFAULT 0,
@@ -55,25 +55,80 @@ class LogProcessor:
 
     def _build_sessions(self):
         """Convert raw records into sessions."""
+        self.sessions.clear()
         for person_id, dates in self.records.items():
             for date, times in dates.items():
                 sorted_times = sorted(times)
-                if len(sorted_times) % 2 == 0:
-                    for i in range(0, len(sorted_times), 2):
-                        self.sessions.append([person_id, date, sorted_times[i], sorted_times[i + 1], "paired"])
-                else:
-                    self.sessions.append([person_id, date, sorted_times[0], sorted_times[-1], "fallback"])
+
+                # If fewer than 2 times, skip
+                if len(sorted_times) < 2:
+                    continue
+
+                # If odd count -> fallback
+                if len(sorted_times) % 2 != 0:
+                    self.sessions.append([
+                        person_id,
+                        date,
+                        sorted_times[0],
+                        sorted_times[-1],
+                        "fallback"
+                    ])
+                    continue
+
+                # First Entry and Last Exit
+                first_entry = sorted_times[0]
+                last_exit = sorted_times[-1]
+
+                # Main paired session
+                self.sessions.append([
+                    person_id,
+                    date,
+                    first_entry,
+                    last_exit,
+                    "Paired"
+                ])
+
+                # Leave periods
+                for i in range(1, len(sorted_times) - 1, 2):
+                    first_exit = sorted_times[i]
+                    second_entry = sorted_times[i + 1]
+
+                    try:
+                        t1 = datetime.strptime(first_exit, "%H:%M")
+                        t2 = datetime.strptime(second_entry, "%H:%M")
+                        duration_min = int((t2 - t1).total_seconds() // 60)
+                    except ValueError:
+                        duration_min = 0
+
+                    self.sessions.append([
+                        person_id,
+                        date,
+                        first_exit,
+                        second_entry,
+                        "Paired",
+                        duration_min,
+                        "Leave",
+                        None
+                    ])
 
     def _save_sessions_to_db(self):
         """Save sessions into SQLite database, replacing duplicates."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             for s in self.sessions:
-                pid, date, entry, exit_, status = s
+                # Handle variable length (leave sessions have more fields)
+                if len(s) == 5:
+                    pid, date, entry, exit_, status = s
+                    duration = 0
+                    mode = None
+                    reason = None
+                else:
+                    pid, date, entry, exit_, status, duration, mode, reason = s
+
                 cursor.execute("""
                     INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (pid, date, entry, exit_, status, 0, None, None))
+                """, (pid, date, entry, exit_, status, duration, mode, reason))
             conn.commit()
     def get_fallback_sessions(self, pid: str):
         """Return fallback sessions for a person ID."""
@@ -97,13 +152,26 @@ class LogProcessor:
 
     def find_late_early(self, pid: str):
         """Return late/early sessions and save durations/reasons in DB."""
-        late_sessions = []
+        results = []
         sessions = [s for s in self.sessions if s[0] == pid]
 
         for s in sessions:
-            pid_s, date, entry_str, exit_str, status = s
+            # Unpack depending on session length
+            if len(s) == 5:
+                pid_s, date, entry_str, exit_str, status = s
+                duration = 0
+                mode = None
+                reason = None
+            else:
+                pid_s, date, entry_str, exit_str, status, duration, mode, reason = s
 
-            # Skip invalid times
+
+            # --- Handle Leave sessions separately ---
+            if mode == "Leave":
+                results.append((pid_s, date, entry_str, exit_str, status, duration, mode))
+                continue
+
+            # --- Handle Late/Early logic for Paired/Fallback sessions ---
             try:
                 entry_dt = datetime.strptime(entry_str, "%H:%M")
                 exit_dt = datetime.strptime(exit_str, "%H:%M")
@@ -130,7 +198,7 @@ class LogProcessor:
             # Check late entry
             if entry_dt > latest_allowed_entry:
                 minutes_late = (entry_dt - latest_allowed_entry).seconds // 60
-                late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
+                results.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
                 allowed_exit = scheduled_exit + timedelta(minutes=float_minutes)
             else:
                 # Allowed entry → allowed exit time is scheduled_exit + (entry_dt - scheduled_entry)
@@ -140,10 +208,10 @@ class LogProcessor:
             # Check early exit
             if exit_dt < allowed_exit:
                 minutes_early = (allowed_exit - exit_dt).seconds // 60
-                late_sessions.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
+                results.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
 
 
-        return late_sessions
+        return results
 
     
     def export_csv(self, csv_path: str):
