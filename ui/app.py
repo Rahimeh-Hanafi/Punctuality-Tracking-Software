@@ -16,7 +16,7 @@ class LogApp:
         self.reporter = ReportGenerator(self.processor)
         self.work_schedules = self.processor.work_schedules
         self.selected_id = tk.StringVar(value="Select ID")
-        # self.sessions = []
+        self.sessions = []
 
         self._setup_ui()
 
@@ -136,6 +136,9 @@ class LogApp:
         Button(win, text="Save All Changes", command=save_all).pack(pady=10)
 
     def open_schedule_editor(self):
+        if not hasattr(self, "sessions") or not self.sessions:
+            messagebox.showinfo("Info", "Please load a log file first.")
+            return
         WorkScheduleEditor(self)
 
     def check_late_early(self):
