@@ -49,7 +49,7 @@ class WorkScheduleEditor:
         # Convert default_exit string "HH:MM" to datetime
         exit_start = datetime.strptime(default_exit, "%H:%M")
 
-        # Generate list of exit times: default_exit to default_exit + 3 hours, every 30 min
+        # Generate list of exit times: default_exit - 0.5h to default_exit + 2.5h, every 30 min
         times_exit = []
         for i in range(-1, 6):  # 7 steps = (- 0.5, 0, 0.5, 1, 1.5, 2, 2.5h)
             t = exit_start + timedelta(minutes=30*i)

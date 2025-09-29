@@ -60,8 +60,8 @@ class LogProcessor:
             for date, times in dates.items():
                 sorted_times = sorted(times)
 
-                # If fewer than 2 times, skip
-                if len(sorted_times) < 2:
+                # If fewer than 1 times, skip
+                if len(sorted_times) < 1:
                     continue
 
                 # If odd count -> fallback
