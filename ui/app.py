@@ -13,6 +13,7 @@ class LogApp:
     def __init__(self, root):
         self.root = root
         self.processor = LogProcessor()
+        self.processor.app = self
         self.reporter = ReportGenerator(self.processor)
         self.work_schedules = self.processor.work_schedules
         self.selected_id = tk.StringVar(value="Select ID")
@@ -66,15 +67,20 @@ class LogApp:
             self._refresh_id_menu()
         except Exception as e:
             messagebox.showerror("Error", f"Could not process file:\n{e}")
-
     def _refresh_id_menu(self):
         menu = self.id_menu['menu']
         menu.delete(0, 'end')
-        ids = sorted(self.processor.records.keys())
+
+        # ✅ Use sessions instead of records, works for DB and TXT
+        ids = sorted({s[0] for s in self.processor.sessions})
+
         if ids:
             self.selected_id.set(ids[0])
             for pid in ids:
                 menu.add_command(label=pid, command=lambda v=pid: self.selected_id.set(v))
+
+        # 🔹 Force UI redraw
+        self.root.update_idletasks()
 
     def export_csv(self):
         if not self.processor.sessions:
@@ -89,9 +95,16 @@ class LogApp:
     def display_selected_id(self):
         self.text_output.delete(1.0, END)
         pid = self.selected_id.get()
-        if not pid or pid not in self.processor.records:
+        if not pid:
             return
+
+        # ✅ Filter directly from sessions 
         filtered = [s for s in self.processor.sessions if s[0] == pid]
+
+        if not filtered:
+            self.text_output.insert(END, f"No sessions found for ID {pid}\n")
+            return
+
         for idx, s in enumerate(filtered):
             self.text_output.insert(END, f"[{idx}] Date: {s[1]} | Entry: {s[2]} | Exit: {s[3]} | Mode: {s[4]}\n")
 

@@ -3,6 +3,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta
 from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED
+from tkinter import messagebox
 
 
 class LogProcessor:
@@ -34,11 +35,72 @@ class LogProcessor:
                 )
             """)
             conn.commit()
+    def _load_sessions_from_db(self):
+        """Load all sessions from SQLite database into self.sessions."""
+        self.sessions.clear()
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, date, entry, exit, status, duration, mode, reason FROM sessions")
+            rows = cursor.fetchall()
+
+            for row in rows:
+                pid, date, entry, exit_, status, duration, mode, reason = row
+
+                # 🔹 Convert ID back to 8-digit padded string for UI display
+                pid_str = str(pid).zfill(8)
+
+                self.sessions.append([
+                    pid_str, date, entry, exit_, status, duration, mode, reason
+                ])
 
     def load_file(self, txt_path: str):
         """Load and process TXT log file."""
         self.records.clear()
         self.sessions.clear()
+
+        # --- Step 1: Peek into file and find the first month (first 6 digits) ---
+        month_in_file = None
+        with open(txt_path, encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) != 4:
+                    continue
+                _, date_str, _, _ = parts
+                if len(date_str) < 6:
+                    continue
+                year_month = date_str[:6]  # first 6 digits, e.g., '140406'
+                if month_in_file is None:
+                    month_in_file = year_month
+
+        # --- Step 1b: Show message if no valid date found ---
+        if not month_in_file:
+            messagebox.showwarning(
+                "Invalid File",
+                "No valid dates found in the file. Please check the file format."
+            )
+            return
+
+        # --- Step 2: Check DB for existing sessions in this month ---
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM sessions
+                WHERE substr(date,1,6) = ?
+            """, (month_in_file,))
+            (count_existing,) = cursor.fetchone()
+
+        # --- Step 3: If found, just load from DB ---
+        if count_existing > 0:
+            messagebox.showinfo(
+                "Data Loaded",
+                f"Sessions for month {month_in_file} already exist in the database. Loading existing data."
+            )
+            self._load_sessions_from_db()   
+            # 🔹 Refresh the UI widget so IDs appear
+            self.app._refresh_id_menu()
+            return
+        # --- Step 4: Otherwise, parse TXT normally and save to DB ---
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM sessions")  # Clear old DB entries
 
@@ -50,6 +112,7 @@ class LogProcessor:
                 person_id, date, time, _ = parts
                 self.records[person_id][date].append(time)
 
+        # --- Step 5: Build sessions and save ---
         self._build_sessions()
         self._save_sessions_to_db()
 
@@ -130,6 +193,9 @@ class LogProcessor:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (pid, date, entry, exit_, status, duration, mode, reason))
             conn.commit()
+        # 🔹 Refresh the ID menu in UI after saving
+        if hasattr(self, "app"):
+            self.app._refresh_id_menu()
     def get_fallback_sessions(self, pid: str):
         """Return fallback sessions for a person ID."""
         return [(i, s) for i, s in enumerate(self.sessions) if s[0] == pid and s[4] == "fallback"]
