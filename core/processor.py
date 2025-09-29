@@ -177,11 +177,20 @@ class LogProcessor:
                 exit_dt = datetime.strptime(exit_str, "%H:%M")
             except ValueError:
                 continue
-
+            # --- Set custom defaults for specific IDs ---
+            if int(pid) in (6, 15):
+                default_entry = "07:30"
+                default_exit = "13:30"
+            elif int(pid) == 22:
+                default_entry = "07:30"
+                default_exit = "14:30"
+            else:
+                default_entry = DEFAULT_ENTRY
+                default_exit = DEFAULT_EXIT
             # Get the scheduled times for this date
             schedule = self.work_schedules.get(date, {})
-            scheduled_entry_str = schedule.get("entry", DEFAULT_ENTRY)        # "07:30"
-            scheduled_exit_str = schedule.get("exit", DEFAULT_EXIT)           # "16:30"
+            scheduled_entry_str = schedule.get("entry", default_entry)        # "07:30"
+            scheduled_exit_str = schedule.get("exit", default_exit)           # "16:30" or "14:30" or "13:30", depends on the ID.
             floating = schedule.get("floating", DEFAULT_FLOATING)             # 1.0 hour
             late_allowed = schedule.get("late_allowed", DEFAULT_LATE_ALLOWED) # False
 

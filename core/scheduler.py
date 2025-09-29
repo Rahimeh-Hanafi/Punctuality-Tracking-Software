@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import Toplevel, Label, Frame, Button, Canvas, Scrollbar, VERTICAL, BooleanVar, Checkbutton, messagebox
 from tkinter.ttk import Combobox
 from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED
-
+from datetime import datetime, timedelta
 
 class WorkScheduleEditor:
     def __init__(self, app):
@@ -11,6 +11,17 @@ class WorkScheduleEditor:
         if not pid:
             messagebox.showinfo("Info", "Select an ID first.")
             return
+
+        # --- Set custom defaults for specific IDs ---
+        if int(pid) in (6, 15):
+            default_entry = "07:30"
+            default_exit = "13:30"
+        elif int(pid) == 22:
+            default_entry = "07:30"
+            default_exit = "14:30"
+        else:
+            default_entry = DEFAULT_ENTRY
+            default_exit = DEFAULT_EXIT
 
         filtered_dates = sorted({s[1] for s in self.app.sessions if s[0] == pid})
         if not filtered_dates:
@@ -35,7 +46,14 @@ class WorkScheduleEditor:
 
         self.combos = {}
         times_entry = [f"{h:02d}:{m:02d}" for h in range(7, 11) for m in (0, 30) if not (h == 10 and m > 30)]
-        times_exit = [f"{h:02d}:{m:02d}" for h in range(16, 19) for m in (0, 30) if not (h == 18 and m > 30)]
+        # Convert default_exit string "HH:MM" to datetime
+        exit_start = datetime.strptime(default_exit, "%H:%M")
+
+        # Generate list of exit times: default_exit to default_exit + 3 hours, every 30 min
+        times_exit = []
+        for i in range(-1, 6):  # 7 steps = (- 0.5, 0, 0.5, 1, 1.5, 2, 2.5h)
+            t = exit_start + timedelta(minutes=30*i)
+            times_exit.append(t.strftime("%H:%M"))
         floating_opts = ["0.0", "0.5", "1.0"]
 
         for date in filtered_dates:
@@ -45,11 +63,11 @@ class WorkScheduleEditor:
             Label(frame, text=date, width=12).grid(row=0, column=0, padx=5)
 
             cb_entry = Combobox(frame, values=times_entry, width=7)
-            cb_entry.set(self.app.work_schedules.get(date, {}).get("entry", DEFAULT_ENTRY))
+            cb_entry.set(self.app.work_schedules.get(date, {}).get("entry", default_entry))
             cb_entry.grid(row=0, column=1, padx=5)
 
             cb_exit = Combobox(frame, values=times_exit, width=7)
-            cb_exit.set(self.app.work_schedules.get(date, {}).get("exit", DEFAULT_EXIT))
+            cb_exit.set(self.app.work_schedules.get(date, {}).get("exit", default_exit))
             cb_exit.grid(row=0, column=2, padx=5)
 
             cb_floating = Combobox(frame, values=floating_opts, width=5)
