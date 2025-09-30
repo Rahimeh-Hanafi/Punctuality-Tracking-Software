@@ -58,7 +58,55 @@ class LogProcessor:
         """Load and process TXT log file."""
         self.records.clear()
         self.sessions.clear()
+        # --- Step 0: Validate file content for proper format ---
+        with open(txt_path, encoding="utf-8") as f:
+            for line_no, line in enumerate(f, start=1):
+                parts = line.strip().split()
 
+                # Check 4 columns
+                if len(parts) != 4:
+                    messagebox.showerror(
+                        "Invalid File",
+                        f"Line {line_no} does not have exactly 4 columns: '{line.strip()}'"
+                        "Expected format: ID(8 chars) DATE(YYYYMMDD) TIME(HH:MM) CODE\n"
+                        "Example: 00000010 14040603 16:38 05"
+                    )
+                    return
+
+                person_id, date_str, time_str, code = parts
+
+                # Check date: exactly 8 numeric characters
+                if len(date_str) != 8 or not date_str.isdigit():
+                    messagebox.showerror(
+                        "Invalid File",
+                        f"Line {line_no} has invalid date (must be 8 digits): '{date_str}'"
+                        "Expected format: ID(8 chars) DATE(YYYYMMDD) TIME(HH:MM) CODE\n"
+                        "Example: 00000010 14040603 16:38 05"
+                    )
+                    return
+                
+                # Check ID: exactly 8 numeric characters
+                if len(person_id) != 8 or not person_id.isdigit():
+                    messagebox.showerror(
+                        "Invalid File",
+                        f"Line {line_no} has invalid ID (must be 8 digits): '{person_id}'\n"
+                        "Expected format: ID(8 chars) DATE(YYYYMMDD) TIME(HH:MM) CODE\n"
+                        "Example: 00000010 14040603 16:38 05"
+                    )
+                    return
+
+                # Check time: format HH:MM
+                try:
+                    from datetime import datetime
+                    datetime.strptime(time_str, "%H:%M")
+                except ValueError:
+                    messagebox.showerror(
+                        "Invalid File",
+                        f"Line {line_no} has invalid time format (should be HH:MM): '{time_str}'"
+                        "Expected format: ID(8 chars) DATE(YYYYMMDD) TIME(HH:MM) CODE\n"
+                        "Example: 00000010 14040603 16:38 05"
+                    )
+                    return
         # --- Step 1: Peek into file and find the first month (first 6 digits) ---
         month_in_file = None
         with open(txt_path, encoding="utf-8") as f:
