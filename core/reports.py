@@ -19,6 +19,20 @@ class ReportGenerator:
             writer.writerows(late_sessions_with_reasons)
 
     def open_late_early_report_window(self, root, pid: str):
+        # First, clean duplicates only for this ID (Necessary for reprocess a specific ID)
+        with sqlite3.connect(self.processor.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM sessions
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM sessions
+                    WHERE id = ?
+                    GROUP BY date, entry, exit
+                )
+                AND id = ?
+            """, (pid, pid))
+            conn.commit()
         """Tkinter window for late/early analysis with reason selection & export."""
         late_sessions = self.processor.find_late_early(pid)
         if not late_sessions:
