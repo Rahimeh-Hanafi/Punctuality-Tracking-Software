@@ -223,10 +223,12 @@ class LogProcessor:
                     ])
 
     def _save_sessions_to_db(self):
-        """Save sessions into SQLite database, replacing duplicates."""
+        """Save sessions into SQLite database, sorted by ID and date."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            for s in self.sessions:
+            # 🔹 Sort by ID (pid) and then by date
+            sorted_sessions = sorted(self.sessions, key=lambda s: (s[0], s[1]))
+            for s in sorted_sessions:
                 # Handle variable length (leave sessions have more fields)
                 if len(s) == 5:
                     pid, date, entry, exit_, status = s
