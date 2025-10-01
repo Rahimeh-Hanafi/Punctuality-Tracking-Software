@@ -10,14 +10,17 @@ class ReportGenerator:
         self.app = app
 
     def save_report(self, file_path: str, late_sessions_with_reasons):
-        """Save late/early report with reasons to CSV including total columns."""
+        """Save late/early report with reasons to CSV including total columns."""        
+        # 🔹 Sort by ID, then by Date, then Entry and Exit if needed
+        sorted_late_sessions = sorted(late_sessions_with_reasons, key=lambda r: (r[0], r[1], r[2], r[3]))
+
         with open(file_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow([
                 "ID", "Date", "Entry", "Exit", "Status", "Duration (min)", "Mode", "Reason",
                 "Total Impermissible", "Total Announced", "Total Other"
             ])
-            writer.writerows(late_sessions_with_reasons)
+            writer.writerows(sorted_late_sessions)
 
     def open_late_early_report_window(self, root, pid: str, holidays=None):
         # Ensure holidays is always a list

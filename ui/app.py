@@ -104,8 +104,9 @@ class LogApp:
         if not filtered:
             self.text_output.insert(END, f"No sessions found for ID {pid}\n")
             return
-
-        for idx, s in enumerate(filtered):
+        # 🔹 Sort by date, then entry, then exit
+        filtered_sorted = sorted(filtered, key=lambda s: (s[1], s[2], s[3]))
+        for idx, s in enumerate(filtered_sorted):
             self.text_output.insert(END, f"[{idx}] Date: {s[1]} | Entry: {s[2]} | Exit: {s[3]} | Mode: {s[4]}\n")
 
     def edit_fallback(self):

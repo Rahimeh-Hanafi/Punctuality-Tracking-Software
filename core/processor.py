@@ -41,7 +41,11 @@ class LogProcessor:
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, date, entry, exit, status, duration, mode, reason FROM sessions")
+            cursor.execute("""
+                SELECT id, date, entry, exit, status, duration, mode, reason
+                FROM sessions
+                ORDER BY id, date
+            """)
             rows = cursor.fetchall()
 
             for row in rows:
@@ -265,6 +269,8 @@ class LogProcessor:
                     WHERE id=? AND date=? AND status=?
                 """, (entry, exit_, s[0], s[1], s[4]))
             conn.commit()
+        # 🔹 Sort sessions by ID and then by date
+        self.sessions.sort(key=lambda s: (s[0], s[1]))
 
     def find_late_early(self, pid: str):
         """Return late/early sessions and save durations/reasons in DB."""
@@ -279,6 +285,8 @@ class LogProcessor:
                 ORDER BY date
             """, (pid,))
             sessions = cursor.fetchall()
+        # 🔹 Sort by ID and then by date
+        sessions.sort(key=lambda s: (s[0], s[1]))
         for s in sessions:
             # Unpack depending on session length
             if len(s) == 5:
@@ -355,6 +363,7 @@ class LogProcessor:
             cursor.execute("""
                 SELECT id, date, entry, exit, status, duration, mode, reason
                 FROM sessions
+                ORDER BY id, date
             """)
             rows = cursor.fetchall()
 
@@ -386,8 +395,10 @@ class LogProcessor:
                     total_other
                 ))
 
-        # Write to CSV
-        import csv
+        # Sort rows by ID and then by date and time
+        sorted_rows = sorted(final_rows, key=lambda r: (r[0], r[1], r[2], r[3]))
+
+        # Write to CSV        
         with open(csv_path, mode="w", newline='', encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -395,5 +406,5 @@ class LogProcessor:
                 "Duration (min)", "Mode", "Reason",
                 "Total Impermissible", "Total Announced", "Total Other"
             ])
-            writer.writerows(final_rows)
+            writer.writerows(sorted_rows)
 
