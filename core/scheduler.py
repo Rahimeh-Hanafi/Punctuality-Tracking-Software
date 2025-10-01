@@ -92,3 +92,52 @@ class WorkScheduleEditor:
             }
         messagebox.showinfo("Saved", "Work schedules updated.")
         self.win.destroy()
+class HolidaySelector:
+    def __init__(self, app):
+        self.app = app
+        self.holidays = {}
+
+        self.win = Toplevel()
+        self.win.title("Select Holidays")
+        self.win.geometry("400x500")
+
+        Label(self.win, text="Select holidays (1–31):", font=("Segoe UI", 12, "bold")).pack(pady=10)
+
+        # --- Frame for main scrollable area ---
+        main_frame = Frame(self.win)
+        main_frame.pack(fill="both", expand=True)
+
+        canvas = Canvas(main_frame)
+        scrollbar = Scrollbar(main_frame, orient=VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        content_frame = Frame(canvas)
+        canvas.create_window((0, 0), window=content_frame, anchor="nw")
+        content_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        # --- 31 checkboxes ---
+        for day in range(1, 32):
+            var = BooleanVar(value=False)  # default: not holiday
+            chk = Checkbutton(content_frame, text=f"Day {day}", variable=var)
+            chk.pack(anchor="w", padx=10)
+            self.holidays[day] = var
+
+        # --- Bottom frame for Save button ---
+        bottom_frame = Frame(self.win)
+        bottom_frame.pack(side="bottom", fill="x", pady=10)
+
+        Button(bottom_frame, text="Save & Edit Work Schedule",
+               command=self.save_and_open_schedules).pack()
+
+    def save_and_open_schedules(self):
+        # Collect holidays
+        self.app.holidays = [day for day, var in self.holidays.items() if var.get()]
+
+        # Close holiday selector window
+        self.win.destroy()
+
+        # Open WorkScheduleEditor
+        WorkScheduleEditor(self.app)

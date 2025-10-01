@@ -5,8 +5,9 @@ import sqlite3
 
 
 class ReportGenerator:
-    def __init__(self, processor):
+    def __init__(self, processor, app=None):
         self.processor = processor
+        self.app = app
 
     def save_report(self, file_path: str, late_sessions_with_reasons):
         """Save late/early report with reasons to CSV including total columns."""
@@ -18,8 +19,42 @@ class ReportGenerator:
             ])
             writer.writerows(late_sessions_with_reasons)
 
-    def open_late_early_report_window(self, root, pid: str):
-        # First, clean duplicates only for this ID (Necessary for reprocess a specific ID)
+    def open_late_early_report_window(self, root, pid: str, holidays=None):
+        # Ensure holidays is always a list
+        holidays = holidays or []
+        # First ensure usual days exist for this ID 
+        with sqlite3.connect(self.processor.db_path) as conn:
+            cursor = conn.cursor()
+
+            # Find all distinct months for this ID
+            cursor.execute("SELECT DISTINCT substr(date,1,6) FROM sessions WHERE id = ?", (pid,))
+            months = [row[0] for row in cursor.fetchall()]
+
+            for ym in months:  # e.g. "140406"
+                year, month = ym[:4], ym[4:6]
+
+                # Days 1–31 except holidays
+                usual_days = [d for d in range(1, 32) if d not in getattr(self.app, "holidays", [])]
+
+                # Get all existing days for this ID + month
+                cursor.execute(
+                    "SELECT substr(date,7,2) FROM sessions WHERE id = ? AND substr(date,1,6) = ?",
+                    (pid, ym)
+                )
+                existing_days = {int(row[0]) for row in cursor.fetchall()}
+
+                # Insert missing days as "Leave"
+                for day in usual_days:
+                    if day not in existing_days:
+                        date_str = f"{ym}{day:02d}"  # e.g. 14040605
+                        cursor.execute("""
+                            INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (pid, date_str, "07:30", "16:30", "paired", 540, "Leave", None))
+
+            conn.commit()
+
+        # Then, clean duplicates only for this ID (Necessary for reprocess a specific ID)
         with sqlite3.connect(self.processor.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""

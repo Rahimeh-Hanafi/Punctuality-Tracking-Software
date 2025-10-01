@@ -5,7 +5,7 @@ from tkinter.ttk import Style, OptionMenu
 
 from core.processor import LogProcessor
 from core.reports import ReportGenerator
-from core.scheduler import WorkScheduleEditor
+from core.scheduler import WorkScheduleEditor, HolidaySelector
 from resources.config import APP_TITLE, APP_SIZE, CREATOR
 
 
@@ -14,11 +14,11 @@ class LogApp:
         self.root = root
         self.processor = LogProcessor()
         self.processor.app = self
-        self.reporter = ReportGenerator(self.processor)
+        self.reporter = ReportGenerator(self.processor, app=self)
         self.work_schedules = self.processor.work_schedules
         self.selected_id = tk.StringVar(value="Select ID")
         self.sessions = []
-
+        self.holidays = []
         self._setup_ui()
 
     def _setup_ui(self):
@@ -152,11 +152,11 @@ class LogApp:
         if not hasattr(self, "sessions") or not self.sessions:
             messagebox.showinfo("Info", "Please load a log file first.")
             return
-        WorkScheduleEditor(self)
+        HolidaySelector(self)
 
     def check_late_early(self):
         pid = self.selected_id.get()
         if not pid:
             messagebox.showinfo("Info", "Select an ID first.")
             return
-        self.reporter.open_late_early_report_window(self.root, pid)
+        self.reporter.open_late_early_report_window(self.root, pid, holidays=self.holidays)

@@ -267,8 +267,16 @@ class LogProcessor:
     def find_late_early(self, pid: str):
         """Return late/early sessions and save durations/reasons in DB."""
         results = []
-        sessions = [s for s in self.sessions if s[0] == pid]
-
+        # --- Get all sessions for this person from DB ---
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, date, entry, exit, status, duration, mode, reason
+                FROM sessions
+                WHERE id = ?
+                ORDER BY date
+            """, (pid,))
+            sessions = cursor.fetchall()
         for s in sessions:
             # Unpack depending on session length
             if len(s) == 5:
