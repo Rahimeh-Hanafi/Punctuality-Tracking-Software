@@ -39,7 +39,7 @@ class ReportGenerator:
                     days_in_month = 31
 
                 # Days except holidays
-                usual_days = [d for d in range(1, days_in_month + 1) if d not in getattr(self.app, "holidays", [])]
+                usual_days = [d for d in range(1, days_in_month + 1) if d not in holidays]
 
                 # Get all existing days for this ID + month
                 cursor.execute(
