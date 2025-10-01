@@ -30,11 +30,16 @@ class ReportGenerator:
             cursor.execute("SELECT DISTINCT substr(date,1,6) FROM sessions WHERE id = ?", (pid,))
             months = [row[0] for row in cursor.fetchall()]
 
-            for ym in months:  # e.g. "140406"
-                year, month = ym[:4], ym[4:6]
+            for ym in months:  # e.g. "140406"               
+                m = int(ym[4:6]) 
 
-                # Days 1–31 except holidays
-                usual_days = [d for d in range(1, 32) if d not in getattr(self.app, "holidays", [])]
+                if 7 <= m <= 12:
+                    days_in_month = 30
+                else:  # months 1–6
+                    days_in_month = 31
+
+                # Days except holidays
+                usual_days = [d for d in range(1, days_in_month + 1) if d not in getattr(self.app, "holidays", [])]
 
                 # Get all existing days for this ID + month
                 cursor.execute(

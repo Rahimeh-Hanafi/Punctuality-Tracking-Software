@@ -5,7 +5,7 @@ from tkinter.ttk import Style, OptionMenu
 
 from core.processor import LogProcessor
 from core.reports import ReportGenerator
-from core.scheduler import WorkScheduleEditor, HolidaySelector
+from core.scheduler import HolidaySelector
 from resources.config import APP_TITLE, APP_SIZE, CREATOR
 
 

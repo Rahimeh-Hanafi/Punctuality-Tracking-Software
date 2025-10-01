@@ -1,4 +1,4 @@
-import tkinter as tk
+import sqlite3
 from tkinter import Toplevel, Label, Frame, Button, Canvas, Scrollbar, VERTICAL, BooleanVar, Checkbutton, messagebox
 from tkinter.ttk import Combobox
 from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED
@@ -101,7 +101,24 @@ class HolidaySelector:
         self.win.title("Select Holidays")
         self.win.geometry("400x500")
 
-        Label(self.win, text="Select holidays (1–31):", font=("Segoe UI", 12, "bold")).pack(pady=10)
+        # --- Get month and year from database (first record just as example) ---
+        with sqlite3.connect(self.app.processor.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT date FROM sessions LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                date = row[0]  # yyyymmdd               
+                month = int(date[4:6])                
+            else:
+                month = 1                  
+
+        if 7 <= month <= 12:
+            days_in_month = 30
+        else:  # months 1–6
+            days_in_month = 31
+
+        Label(self.win, text=f"Select holidays (1–{days_in_month}):",
+            font=("Segoe UI", 12, "bold")).pack(pady=10)
 
         # --- Frame for main scrollable area ---
         main_frame = Frame(self.win)
@@ -118,8 +135,8 @@ class HolidaySelector:
         canvas.create_window((0, 0), window=content_frame, anchor="nw")
         content_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
-        # --- 31 checkboxes ---
-        for day in range(1, 32):
+        # --- Correct number of checkboxes based on month ---
+        for day in range(1, days_in_month + 1):
             var = BooleanVar(value=False)  # default: not holiday
             chk = Checkbutton(content_frame, text=f"Day {day}", variable=var)
             chk.pack(anchor="w", padx=10)
