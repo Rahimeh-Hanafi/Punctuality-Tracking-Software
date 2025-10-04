@@ -10,3 +10,10 @@ DEFAULT_ENTRY = "07:30"
 DEFAULT_EXIT = "16:30"
 DEFAULT_FLOATING = 1.0
 DEFAULT_LATE_ALLOWED = False
+
+# Constant exceptions 
+EXCEPTIONS = [
+    {"id": 6, "entry": "07:30", "exit": "13:30"},
+    {"id": 15, "entry": "07:30", "exit": "13:30"},
+    {"id": 22, "entry": "07:30", "exit": "14:30"},
+]

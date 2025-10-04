@@ -2,7 +2,7 @@ import csv
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta
-from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED
+from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED, EXCEPTIONS
 from tkinter import messagebox
 
 
@@ -11,8 +11,10 @@ class LogProcessor:
         self.records = defaultdict(lambda: defaultdict(list))
         self.sessions = []
         self.work_schedules = {} 
+        self.exceptions = {}
         self.db_path = db_path
-        self._init_db()
+        self._init_db()                       
+        self.load_exceptions_from_config()    # Always constant        
 
     def _init_db(self):
         """Initialize SQLite DB and sessions table."""
@@ -34,7 +36,125 @@ class LogProcessor:
                     total_other INTEGER DEFAULT 0
                 )
             """)
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS work_schedules (
+                    date TEXT PRIMARY KEY,
+                    is_holiday INTEGER DEFAULT 0,
+                    entry TEXT DEFAULT ?,
+                    exit TEXT DEFAULT ?,
+                    floating REAL DEFAULT ?,
+                    late_allowed INTEGER DEFAULT ?
+                )
+            ''', (DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, int(DEFAULT_LATE_ALLOWED)))
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS exceptions (
+                    id TEXT PRIMARY KEY,
+                    entry TEXT,
+                    exit TEXT
+                )
+            """)
             conn.commit()
+    def load_exceptions_from_config(self):
+        """Read constant exceptions from config.py and insert into DB."""
+        self.exceptions.clear()
+
+        # Convert to dictionary in memory
+        self.exceptions = {e["id"]: (e["entry"], e["exit"]) for e in EXCEPTIONS}
+
+        # 🔹 Insert into database
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            for pid, (entry, exit_) in self.exceptions.items():
+                cursor.execute("""
+                    INSERT OR REPLACE INTO exceptions (id, entry, exit)
+                    VALUES (?, ?, ?)
+                """, (pid, entry, exit_))
+            conn.commit()
+
+    def _build_and_save_schedules_to_db(self, month_in_file: str):
+        """
+        Completely rebuild the work_schedules table for a single month.
+        Deletes all existing data and inserts fresh daily records
+        for the given month (month_in_file, e.g. "140406").
+        Uses Jalali calendar rules:
+        - Months 1–6 → 31 days
+        - Months 7–12 → 30 days
+        """
+
+        y = int(month_in_file[:4])
+        m = int(month_in_file[4:6])
+
+        # Jalali month length
+        if 7 <= m <= 12:
+            days_in_month = 30
+        else:
+            days_in_month = 31
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            # 🔹 1. Wipe the table clean
+            cursor.execute("DELETE FROM work_schedules")
+            conn.commit()
+            print("Cleared all existing work_schedules data.")
+
+            # 🔹 2. Insert all days for this month
+            for d in range(1, days_in_month + 1):
+                date_str = f"{y:04d}{m:02d}{d:02d}"
+
+                cursor.execute("""
+                    INSERT INTO work_schedules (date, is_holiday, entry, exit, floating, late_allowed)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    date_str,
+                    0,  # not holiday by default
+                    DEFAULT_ENTRY,
+                    DEFAULT_EXIT,
+                    DEFAULT_FLOATING,
+                    int(DEFAULT_LATE_ALLOWED),
+                ))
+
+            conn.commit()       
+    def _load_schedules_from_db(self, month_in_file: str):
+        """Load all work schedules from the database into self.work_schedules."""
+
+        self.work_schedules.clear()
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT date, is_holiday, entry, exit, floating, late_allowed
+                    FROM work_schedules
+                    ORDER BY date
+                """)
+                rows = cursor.fetchall()
+
+        except sqlite3.Error as e:
+            messagebox.showerror(
+                "Database Error",
+                f"Failed to load schedules from the database:\n{e}\n\n"
+                f"Rebuilding schedules for month {month_in_file}..."
+            )
+            self._build_and_save_schedules_to_db(month_in_file)
+            return
+
+        # Build dictionary
+        for date, is_holiday, entry, exit_, floating, late_allowed in rows:
+            self.work_schedules[date] = {
+                "is_holiday": bool(is_holiday),
+                "entry": entry,
+                "exit": exit_,
+                "floating": float(floating),
+                "late_allowed": bool(late_allowed),
+            }
+
+        messagebox.showinfo(
+            "Work Schedules Loaded",
+            f"✅ Loaded {len(rows)} work schedule records from DB."
+        )        
     def _load_sessions_from_db(self):
         """Load all sessions from SQLite database into self.sessions."""
         self.sessions.clear()
@@ -100,8 +220,7 @@ class LogProcessor:
                     return
 
                 # Check time: format HH:MM
-                try:
-                    from datetime import datetime
+                try:                    
                     datetime.strptime(time_str, "%H:%M")
                 except ValueError:
                     messagebox.showerror(
@@ -151,6 +270,7 @@ class LogProcessor:
             self._load_sessions_from_db()   
             # 🔹 Refresh the UI widget so IDs appear
             self.app._refresh_id_menu()
+            self._load_schedules_from_db(month_in_file)
             return
         # --- Step 4: Otherwise, parse TXT normally and save to DB ---
         with sqlite3.connect(self.db_path) as conn:
@@ -167,6 +287,7 @@ class LogProcessor:
         # --- Step 5: Build sessions and save ---
         self._build_sessions()
         self._save_sessions_to_db()
+        self._build_and_save_schedules_to_db(month_in_file)
 
     def _build_sessions(self):
         """Convert raw records into sessions."""
