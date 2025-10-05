@@ -12,22 +12,56 @@ class WorkScheduleEditor:
             messagebox.showinfo("Info", "Select an ID first.")
             return
 
-        # --- Set custom defaults for specific IDs ---
-        if int(pid) in (6, 15):
-            default_entry = "07:30"
-            default_exit = "13:30"
-        elif int(pid) == 22:
-            default_entry = "07:30"
-            default_exit = "14:30"
-        else:
-            default_entry = DEFAULT_ENTRY
-            default_exit = DEFAULT_EXIT
+        # --- Get all work schedules from DB (already has defaults) ---
+        try:
+            with sqlite3.connect(self.app.processor.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT date, entry, exit, floating, late_allowed FROM work_schedules")
+                schedules = {row[0]: {
+                    "entry": row[1],
+                    "exit": row[2],
+                    "floating": row[3],
+                    "late_allowed": bool(row[4])
+                } for row in cursor.fetchall()}
+        except sqlite3.Error as e:
+            messagebox.showerror("Database Error", f"Failed to load schedules:\n{e}")
+            return
 
         filtered_dates = sorted({s[1] for s in self.app.sessions if s[0] == pid})
         if not filtered_dates:
             messagebox.showinfo("Info", "No sessions found for selected ID.")
             return
 
+        # --- Load all work schedules from database ---
+        try:
+            with sqlite3.connect(self.app.processor.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT date, entry, exit, floating, late_allowed FROM work_schedules")
+                schedules = {
+                    row[0]: {
+                        "entry": row[1],
+                        "exit": row[2],
+                        "floating": row[3],
+                        "late_allowed": bool(row[4]),
+                    }
+                    for row in cursor.fetchall()
+                }
+
+                # --- Load per-ID exceptions from the 'exceptions' table ---
+                cursor.execute("SELECT id, entry, exit FROM exceptions")
+                rows = cursor.fetchall()
+                exceptions = {str(r[0]): {"entry": r[1], "exit": r[2]} for r in rows}
+
+        except sqlite3.Error as e:
+            messagebox.showerror("Database Error", f"Failed to load schedules or exceptions:\n{e}")
+            return
+
+        # --- Apply exception if exists for this pid ---
+        if pid in exceptions:
+            for d in schedules.keys():
+                schedules[d]["entry"] = exceptions[pid]["entry"]
+                schedules[d]["exit"] = exceptions[pid]["exit"]
+        # --- Build window ---
         self.win = Toplevel()
         self.win.title("Work Schedule Editor")
         self.win.geometry("600x500")
@@ -45,15 +79,8 @@ class WorkScheduleEditor:
         content_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
         self.combos = {}
-        times_entry = [f"{h:02d}:{m:02d}" for h in range(7, 11) for m in (0, 30) if not (h == 10 and m > 30)]
-        # Convert default_exit string "HH:MM" to datetime
-        exit_start = datetime.strptime(default_exit, "%H:%M")
-
-        # Generate list of exit times: default_exit - 0.5h to default_exit + 2.5h, every 30 min
-        times_exit = []
-        for i in range(-1, 6):  # 7 steps = (- 0.5, 0, 0.5, 1, 1.5, 2, 2.5h)
-            t = exit_start + timedelta(minutes=30*i)
-            times_exit.append(t.strftime("%H:%M"))
+        times_entry = [f"{h:02d}:{m:02d}" for h in range(7, 11) for m in (0, 30)]
+        times_exit = [f"{h:02d}:{m:02d}" for h in range(13, 18) for m in (0, 30)]
         floating_opts = ["0.0", "0.5", "1.0"]
 
         for date in filtered_dates:
@@ -63,18 +90,18 @@ class WorkScheduleEditor:
             Label(frame, text=date, width=12).grid(row=0, column=0, padx=5)
 
             cb_entry = Combobox(frame, values=times_entry, width=7)
-            cb_entry.set(self.app.work_schedules.get(date, {}).get("entry", default_entry))
+            cb_entry.set(schedules[date]["entry"])
             cb_entry.grid(row=0, column=1, padx=5)
 
             cb_exit = Combobox(frame, values=times_exit, width=7)
-            cb_exit.set(self.app.work_schedules.get(date, {}).get("exit", default_exit))
+            cb_exit.set(schedules[date]["exit"])
             cb_exit.grid(row=0, column=2, padx=5)
 
             cb_floating = Combobox(frame, values=floating_opts, width=5)
-            cb_floating.set(str(self.app.work_schedules.get(date, {}).get("floating", DEFAULT_FLOATING)))
+            cb_floating.set(str(schedules[date]["floating"]))
             cb_floating.grid(row=0, column=3, padx=5)
 
-            late_var = BooleanVar(value=self.app.work_schedules.get(date, {}).get("late_allowed", DEFAULT_LATE_ALLOWED))
+            late_var = BooleanVar(value=schedules[date]["late_allowed"])
             chk = Checkbutton(frame, text="10 min late OK", variable=late_var)
             chk.grid(row=0, column=4, padx=5)
 
@@ -83,6 +110,8 @@ class WorkScheduleEditor:
         Button(content_frame, text="Save All", command=self.save_schedules).pack(pady=10)
 
     def save_schedules(self):
+        """Save edited work schedules to memory and database."""
+        # 1️⃣ Update in-memory dictionary
         for d, (cb_e, cb_x, cb_f, late_v) in self.combos.items():
             self.app.work_schedules[d] = {
                 "entry": cb_e.get(),
@@ -90,7 +119,35 @@ class WorkScheduleEditor:
                 "floating": float(cb_f.get()),
                 "late_allowed": late_v.get()
             }
-        messagebox.showinfo("Saved", "Work schedules updated.")
+
+        # 2️⃣ Save all schedules to the database
+        try:
+            with sqlite3.connect(self.app.processor.db_path) as conn:
+                cursor = conn.cursor()
+
+                for d, schedule in self.app.work_schedules.items():
+                    cursor.execute("""
+                        UPDATE work_schedules
+                        SET entry = ?, 
+                            exit = ?, 
+                            floating = ?, 
+                            late_allowed = ?
+                        WHERE date = ?
+                    """, (
+                        schedule["entry"],
+                        schedule["exit"],
+                        schedule["floating"],
+                        int(schedule["late_allowed"]),
+                        d
+                    ))
+                conn.commit()
+
+        except sqlite3.Error as e:
+            messagebox.showerror("Database Error", f"Failed to save schedules:\n{e}")
+            return
+
+        # 3️⃣ Confirm success to user
+        messagebox.showinfo("Saved", "✅ Work schedules updated successfully.")
         self.win.destroy()
 class HolidaySelector:
     def __init__(self, app):

@@ -267,10 +267,9 @@ class LogProcessor:
                 "Data Loaded",
                 f"Sessions for month {month_in_file} already exist in the database. Loading existing data."
             )
-            self._load_sessions_from_db()   
-            # 🔹 Refresh the UI widget so IDs appear
-            self.app._refresh_id_menu()
+            self._load_sessions_from_db()
             self._load_schedules_from_db(month_in_file)
+            self.app._refresh_id_menu()
             return
         # --- Step 4: Otherwise, parse TXT normally and save to DB ---
         with sqlite3.connect(self.db_path) as conn:
@@ -394,9 +393,10 @@ class LogProcessor:
         self.sessions.sort(key=lambda s: (s[0], s[1]))
 
     def find_late_early(self, pid: str):
-        """Return late/early sessions and save durations/reasons in DB."""
+        """Return late/early sessions with minutes and reasons, using DB schedules and exceptions."""
         results = []
-        # --- Get all sessions for this person from DB ---
+
+        # --- Step 1: Fetch all sessions for this ID from the DB ---
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -406,72 +406,81 @@ class LogProcessor:
                 ORDER BY date
             """, (pid,))
             sessions = cursor.fetchall()
-        # 🔹 Sort by ID and then by date
+
+        # 🔹 Sort by ID then date (extra safety)
         sessions.sort(key=lambda s: (s[0], s[1]))
         for s in sessions:
-            # Unpack depending on session length
+            # --- Step 2: Unpack session depending on tuple length ---
             if len(s) == 5:
                 pid_s, date, entry_str, exit_str, status = s
-                duration = 0
-                mode = None
-                reason = None
+                duration, mode, reason = 0, None, None
             else:
                 pid_s, date, entry_str, exit_str, status, duration, mode, reason = s
 
-
-            # --- Handle Leave sessions separately ---
+            # --- Step 3: Skip Leave sessions (they are reported as-is) ---
             if mode == "Leave":
                 results.append((pid_s, date, entry_str, exit_str, status, duration, mode))
                 continue
 
-            # --- Handle Late/Early logic for Paired/Fallback sessions ---
+            # --- Step 4: Convert actual entry/exit strings to datetime objects ---
             try:
                 entry_dt = datetime.strptime(entry_str, "%H:%M")
                 exit_dt = datetime.strptime(exit_str, "%H:%M")
             except ValueError:
-                continue
-            # --- Set custom defaults for specific IDs ---
-            if int(pid) in (6, 15):
-                default_entry = "07:30"
-                default_exit = "13:30"
-            elif int(pid) == 22:
-                default_entry = "07:30"
-                default_exit = "14:30"
-            else:
-                default_entry = DEFAULT_ENTRY
-                default_exit = DEFAULT_EXIT
-            # Get the scheduled times for this date
-            schedule = self.work_schedules.get(date, {})
-            scheduled_entry_str = schedule.get("entry", default_entry)        # "07:30"
-            scheduled_exit_str = schedule.get("exit", default_exit)           # "16:30" or "14:30" or "13:30", depends on the ID.
-            floating = schedule.get("floating", DEFAULT_FLOATING)             # 1.0 hour
-            late_allowed = schedule.get("late_allowed", DEFAULT_LATE_ALLOWED) # False
+                continue  # Skip invalid entries
 
+            # --- Step 5: Fetch scheduled times from work_schedules table ---
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT entry, exit, floating, late_allowed
+                    FROM work_schedules
+                    WHERE date = ?
+                """, (date,))
+                sched = cursor.fetchone()
+
+            if sched:
+                scheduled_entry_str, scheduled_exit_str, floating, late_allowed = sched
+            else:
+                # Fallback to defaults if schedule missing
+                scheduled_entry_str = DEFAULT_ENTRY
+                scheduled_exit_str = DEFAULT_EXIT
+                floating = DEFAULT_FLOATING
+                late_allowed = DEFAULT_LATE_ALLOWED
+
+            # --- Step 6: Check for ID-specific exceptions ---
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT entry, exit FROM exceptions WHERE id = ?", (pid,))
+                ex = cursor.fetchone()
+            if ex:
+                scheduled_entry_str, scheduled_exit_str = ex
+
+            # --- Step 7: Convert schedule strings to datetime objects ---
             scheduled_entry = datetime.strptime(scheduled_entry_str, "%H:%M")
             scheduled_exit = datetime.strptime(scheduled_exit_str, "%H:%M")
-            float_minutes = int(floating * 60)
+            float_minutes = int(float(floating) * 60)
 
-            # Allowed entry window
+            # --- Step 8: Calculate allowed entry window ---
             if late_allowed:
                 latest_allowed_entry = scheduled_entry + timedelta(minutes=10 + float_minutes)
             else:
                 latest_allowed_entry = scheduled_entry + timedelta(minutes=float_minutes)
 
-            # Check late entry
+            # --- Step 9: Check Late Entry ---
             if entry_dt > latest_allowed_entry:
                 minutes_late = (entry_dt - latest_allowed_entry).seconds // 60
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
                 allowed_exit = scheduled_exit + timedelta(minutes=float_minutes)
             else:
-                # Allowed entry → allowed exit time is scheduled_exit + (entry_dt - scheduled_entry)
+                # Allowed entry → allowed exit is extended by difference between actual and scheduled entry
                 delta_entry = entry_dt - scheduled_entry
                 allowed_exit = scheduled_exit + delta_entry
 
-            # Check early exit
+            # --- Step 10: Check Early Exit ---
             if exit_dt < allowed_exit:
                 minutes_early = (allowed_exit - exit_dt).seconds // 60
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
-
 
         return results
 
