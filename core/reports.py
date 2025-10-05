@@ -2,6 +2,7 @@ import csv
 import tkinter as tk
 from tkinter import messagebox, filedialog
 import sqlite3
+from datetime import datetime
 
 
 class ReportGenerator:
@@ -72,12 +73,15 @@ class ReportGenerator:
                             ex_row = cursor.fetchone()
                             if ex_row:
                                 entry_time, exit_time = ex_row
+                            entry_dt = datetime.strptime(entry_time, "%H:%M")
+                            exit_dt = datetime.strptime(exit_time, "%H:%M")
+                            duration_minutes = int((exit_dt - entry_dt).total_seconds() // 60)
 
                             # ✅ Insert missing record
                             cursor.execute("""
                                 INSERT INTO sessions (id, date, entry, exit, status, duration, mode, reason)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (pid, date_str, entry_time, exit_time, "paired", 540, "Leave", None))
+                            """, (pid, date_str, entry_time, exit_time, "paired", duration_minutes, "Leave", None))
 
                 conn.commit()
                 messagebox.showinfo("Completed", f"Missing days for ID {pid} have been added as 'Leave'.")
