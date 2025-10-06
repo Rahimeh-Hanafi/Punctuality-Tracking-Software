@@ -37,16 +37,16 @@ class LogProcessor:
                 )
             """)
 
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS work_schedules (
                     date TEXT PRIMARY KEY,
                     is_holiday INTEGER DEFAULT 0,
-                    entry TEXT DEFAULT ?,
-                    exit TEXT DEFAULT ?,
-                    floating REAL DEFAULT ?,
-                    late_allowed INTEGER DEFAULT ?
+                    entry TEXT DEFAULT '{DEFAULT_ENTRY}',
+                    exit TEXT DEFAULT '{DEFAULT_EXIT}',
+                    floating REAL DEFAULT {DEFAULT_FLOATING},
+                    late_allowed INTEGER DEFAULT {int(DEFAULT_LATE_ALLOWED)}
                 )
-            ''', (DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, int(DEFAULT_LATE_ALLOWED)))
+            ''')
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS exceptions (
