@@ -191,10 +191,15 @@ class HolidaySelector:
         content_frame = Frame(canvas)
         canvas.create_window((0, 0), window=content_frame, anchor="nw")
         content_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-
+        # --- Load holiday info from DB ---
+        existing_holidays = set()
+        with sqlite3.connect(self.app.processor.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT date FROM work_schedules WHERE is_holiday = 1")
+            existing_holidays = {int(row[0][6:8]) for row in cursor.fetchall()}
         # --- Correct number of checkboxes based on month ---
         for day in range(1, days_in_month + 1):
-            var = BooleanVar(value=False)  # default: not holiday
+            var = BooleanVar(value=(day in existing_holidays))
             chk = Checkbutton(content_frame, text=f"Day {day}", variable=var)
             chk.pack(anchor="w", padx=10)
             self.holidays[day] = var
@@ -209,6 +214,19 @@ class HolidaySelector:
     def save_and_open_schedules(self):
         # Collect holidays
         self.app.holidays = [day for day, var in self.holidays.items() if var.get()]
+        # Save holidays to DB
+        with sqlite3.connect(self.app.processor.db_path) as conn:
+            cursor = conn.cursor()
+            # Reset all to not holiday
+            cursor.execute("UPDATE work_schedules SET is_holiday = 0")
+            # Mark selected as holidays
+            for day in self.app.holidays:
+                cursor.execute("""
+                    UPDATE work_schedules
+                    SET is_holiday = 1
+                    WHERE substr(date,7,2) = ?
+                """, (f"{day:02d}",))
+            conn.commit()
 
         # Close holiday selector window
         self.win.destroy()
