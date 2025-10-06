@@ -45,7 +45,17 @@ class ReportGenerator:
                     # Days except holidays
                     usual_days = [d for d in range(1, days_in_month + 1) if d not in holidays]
 
-                    # Get existing days
+                    # Before inserting new Leave record, remove any Leave rows for holidays
+                    # that may have been created by pressing "Check Late/Early Sessions"
+                    # before setting the work schedule (to avoid accidental duplicates)
+                    for h in holidays:
+                        date_str = f"{ym}{h:02d}"
+                        cursor.execute("""
+                            DELETE FROM sessions
+                            WHERE id = ? AND date = ? AND mode = 'Leave'
+                        """, (pid, date_str))
+
+                    # Insert missing non-holiday Leave rows
                     cursor.execute("""
                         SELECT substr(date,7,2)
                         FROM sessions
