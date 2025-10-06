@@ -5,7 +5,7 @@ from tkinter.ttk import Style, OptionMenu
 
 from core.processor import LogProcessor
 from core.reports import ReportGenerator
-from core.scheduler import HolidaySelector
+from core.scheduler import WorkScheduleEditor
 from resources.config import APP_TITLE, APP_SIZE, CREATOR
 
 
@@ -153,7 +153,7 @@ class LogApp:
         if not hasattr(self, "sessions") or not self.sessions:
             messagebox.showinfo("Info", "Please load a log file first.")
             return
-        HolidaySelector(self)
+        WorkScheduleEditor(self)
 
     def check_late_early(self):
         pid = self.selected_id.get()
