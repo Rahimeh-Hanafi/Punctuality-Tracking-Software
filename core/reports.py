@@ -265,7 +265,7 @@ class ReportGenerator:
         btn_frame = tk.Frame(result_win)
         btn_frame.pack(pady=10)
 
-        tk.Button(btn_frame, text="Calculate Times", command=calculate_times,
-                  bg="darkblue", fg="white").pack(side='left', padx=5)
+        # tk.Button(btn_frame, text="Calculate Times", command=calculate_times,
+        #           bg="darkblue", fg="white").pack(side='left', padx=5)
         tk.Button(btn_frame, text="Save Report", command=save_report_ui,
                   bg="green", fg="white").pack(side='left', padx=5)
