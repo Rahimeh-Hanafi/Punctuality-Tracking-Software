@@ -23,9 +23,7 @@ class ReportGenerator:
             ])
             writer.writerows(sorted_late_sessions)
 
-    def open_late_early_report_window(self, root, pid: str, holidays=None):
-        holidays = holidays or []
-        
+    def open_late_early_report_window(self, root, pid: str, holidays=None):      
         try:
             with sqlite3.connect(self.processor.db_path) as conn:
                 cursor = conn.cursor()
@@ -34,7 +32,12 @@ class ReportGenerator:
                 cursor.execute("SELECT DISTINCT substr(date,1,6) FROM sessions WHERE id = ?", (pid,))
                 months = [row[0] for row in cursor.fetchall()]
 
-                for ym in months:  # e.g. "140406"               
+                for ym in months:  # e.g. "140406"  
+                    cursor.execute("""
+                        SELECT date FROM work_schedules 
+                        WHERE is_holiday = 1 AND substr(date,1,6) = ?
+                    """, (ym,))
+                    holidays = [int(date[6:8]) for (date,) in cursor.fetchall()]                            
                     m = int(ym[4:6]) 
 
                     if 7 <= m <= 12:
