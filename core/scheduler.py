@@ -78,8 +78,8 @@ class WorkScheduleEditor:
         content_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
         self.combos = {}
-        times_entry = [f"{h:02d}:{m:02d}" for h in range(7, 11) for m in (0, 30)]
-        times_exit = [f"{h:02d}:{m:02d}" for h in range(13, 18) for m in (0, 30)]
+        times_entry = [f"{h:02d}:{m:02d}" for h in range(7, 12) for m in (0, 30)]
+        times_exit = [f"{h:02d}:{m:02d}" for h in range(13, 20) for m in (0, 30)]
         floating_opts = ["0.0", "0.5", "1.0"]
 
         # --- Create rows for each day ---
