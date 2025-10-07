@@ -9,6 +9,7 @@ class ReportGenerator:
     def __init__(self, processor, app=None):
         self.processor = processor
         self.app = app
+        self.db_path = processor.db_path
 
     def save_report(self, file_path: str, late_sessions_with_reasons):
         """Save late/early report with reasons to CSV including total columns."""        
@@ -103,20 +104,6 @@ class ReportGenerator:
             messagebox.showerror("Database Error", f"Error while updating missing days:\n{e}")
 
 
-        # Then, clean duplicates only for this ID (Necessary for reprocess a specific ID)
-        with sqlite3.connect(self.processor.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                DELETE FROM sessions
-                WHERE rowid NOT IN (
-                    SELECT MIN(rowid)
-                    FROM sessions
-                    WHERE id = ?
-                    GROUP BY date, entry, exit
-                )
-                AND id = ?
-            """, (pid, pid))
-            conn.commit()
         """Tkinter window for late/early analysis with reason selection & export."""
         late_sessions = self.processor.find_late_early(pid)
         if not late_sessions:
@@ -164,27 +151,11 @@ class ReportGenerator:
             var.set("Select Reason")
             
             # Callback to save immediately
-            def on_reason_selected(*args, var=var, pid_r=pid_r, date=date, entry=entry, exit=exit, status=status, mode=mode):
+            def on_reason_selected(*args, var=var):
+                # Just store selection in memory, no DB change
                 selected_reason = var.get()
                 if selected_reason == "Select Reason":
                     return
-                with sqlite3.connect(self.processor.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        UPDATE sessions
-                        SET reason = ?
-                        WHERE id = ? AND date = ? AND entry = ? AND exit = ? AND status = ? AND mode = ?
-                    """, (
-                        selected_reason,
-                        pid_r,
-                        date,
-                        entry,
-                        exit,
-                        status,
-                        mode
-                    ))
-                    conn.commit()
-
             # Attach trace to trigger DB update on selection
             var.trace_add("write", on_reason_selected)
             dropdown = tk.OptionMenu(row_frame, var, "Impermissible", "Announced", "Other")
@@ -233,9 +204,30 @@ class ReportGenerator:
             ]
 
             self.save_report(file_path, rows)
-            # --- Save reasons to database ---
+            # --- Database updates ---             
             with sqlite3.connect(self.processor.db_path) as conn:
                 cursor = conn.cursor()
+
+                # Remove duplicates for this ID (Necessary for reprocessed IDs)
+                cursor.execute("""
+                    DELETE FROM sessions
+                    WHERE rowid NOT IN (
+                        SELECT MIN(rowid)
+                        FROM sessions
+                        WHERE id = ?
+                        GROUP BY date, entry, exit
+                    )
+                    AND id = ?
+                """, (pid, pid))      
+
+                # 2️⃣ Clear old duration, mode, reason for this ID (Necessary for reprocessed IDs)
+                cursor.execute("""
+                    UPDATE sessions
+                    SET duration = NULL,
+                        mode = NULL,
+                        reason = NULL
+                    WHERE id = ?
+                """, (pid,))       
 
                 # Get all unique (id, date, entry, exit) tuples from reason_vars
                 unique_keys = {(pid_r, date, entry, exit) for _, _, pid_r, date, entry, exit, *_ in reason_vars}
@@ -272,3 +264,57 @@ class ReportGenerator:
         #           bg="darkblue", fg="white").pack(side='left', padx=5)
         tk.Button(btn_frame, text="Save Report", command=save_report_ui,
                   bg="green", fg="white").pack(side='left', padx=5)
+
+    def export_csv(self, csv_path: str):
+        """Export all sessions from DB with per-ID totals."""
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, date, entry, exit, status, duration, mode, reason
+                FROM sessions
+                ORDER BY id, date
+            """)
+            rows = cursor.fetchall()
+
+        # Group rows by ID
+        from collections import defaultdict
+        rows_by_id = defaultdict(list)
+        for r in rows:
+            pid = r[0]  # first column = ID
+            rows_by_id[pid].append(r)
+
+        final_rows = []
+        for pid, session_rows in rows_by_id.items():
+            total_impermissible = sum(r[5] for r in session_rows if r[7] == "Impermissible")
+            total_announced = sum(r[5] for r in session_rows if r[7] == "Announced")
+            total_other = sum(r[5] for r in session_rows if r[7] not in ("Impermissible", "Announced", None))
+
+            for r in session_rows:
+                final_rows.append((
+                    r[0],  # ID
+                    r[1],  # Date
+                    r[2],  # Entry
+                    r[3],  # Exit
+                    r[4],  # Status
+                    r[5],  # Duration
+                    r[6],  # Mode
+                    r[7],  # Reason
+                    total_impermissible,
+                    total_announced,
+                    total_other
+                ))
+
+        # Sort rows by ID and then by date and time
+        sorted_rows = sorted(final_rows, key=lambda r: (r[0], r[1], r[2], r[3]))
+
+        # Write to CSV        
+        with open(csv_path, mode="w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "ID", "Date", "Entry", "Exit", "Status",
+                "Duration (min)", "Mode", "Reason",
+                "Total Impermissible", "Total Announced", "Total Other"
+            ])
+            writer.writerows(sorted_rows)
+

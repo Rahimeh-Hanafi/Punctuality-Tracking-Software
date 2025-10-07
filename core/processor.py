@@ -406,7 +406,16 @@ class LogProcessor:
                 ORDER BY date
             """, (pid,))
             sessions = cursor.fetchall()
+        # --- Remove duplicates in memory (keep first occurrence) ---
+        seen = set()
+        unique_sessions = []
+        for s in sessions:
+            key = (s[1], s[2], s[3])  # date, entry, exit
+            if key not in seen:
+                seen.add(key)
+                unique_sessions.append(s)
 
+        sessions = unique_sessions
         # 🔹 Sort by ID then date (extra safety)
         sessions.sort(key=lambda s: (s[0], s[1]))
         for s in sessions:
@@ -483,58 +492,4 @@ class LogProcessor:
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
 
         return results
-
-    
-    def export_csv(self, csv_path: str):
-        """Export all sessions from DB with per-ID totals."""
-
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, date, entry, exit, status, duration, mode, reason
-                FROM sessions
-                ORDER BY id, date
-            """)
-            rows = cursor.fetchall()
-
-        # Group rows by ID
-        from collections import defaultdict
-        rows_by_id = defaultdict(list)
-        for r in rows:
-            pid = r[0]  # first column = ID
-            rows_by_id[pid].append(r)
-
-        final_rows = []
-        for pid, session_rows in rows_by_id.items():
-            total_impermissible = sum(r[5] for r in session_rows if r[7] == "Impermissible")
-            total_announced = sum(r[5] for r in session_rows if r[7] == "Announced")
-            total_other = sum(r[5] for r in session_rows if r[7] not in ("Impermissible", "Announced", None))
-
-            for r in session_rows:
-                final_rows.append((
-                    r[0],  # ID
-                    r[1],  # Date
-                    r[2],  # Entry
-                    r[3],  # Exit
-                    r[4],  # Status
-                    r[5],  # Duration
-                    r[6],  # Mode
-                    r[7],  # Reason
-                    total_impermissible,
-                    total_announced,
-                    total_other
-                ))
-
-        # Sort rows by ID and then by date and time
-        sorted_rows = sorted(final_rows, key=lambda r: (r[0], r[1], r[2], r[3]))
-
-        # Write to CSV        
-        with open(csv_path, mode="w", newline='', encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "ID", "Date", "Entry", "Exit", "Status",
-                "Duration (min)", "Mode", "Reason",
-                "Total Impermissible", "Total Announced", "Total Other"
-            ])
-            writer.writerows(sorted_rows)
 

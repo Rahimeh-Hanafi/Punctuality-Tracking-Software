@@ -89,7 +89,7 @@ class LogApp:
         path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
         if not path:
             return
-        self.processor.export_csv(path)
+        self.reporter.export_csv(path)
         messagebox.showinfo("Success", f"CSV file saved to:\n{path}")
 
     def display_selected_id(self):
