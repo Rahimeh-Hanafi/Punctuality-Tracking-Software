@@ -97,12 +97,27 @@ class WorkScheduleEditor:
                         new_exit = normal_entry + timedelta(seconds=ex_work_duration.total_seconds() * ratio)
                         exceptions[ex_key]["entry"] = normal_entry.strftime(TIME_FMT)
                         exceptions[ex_key]["exit"] = self.round_to_half_hour(new_exit.strftime(TIME_FMT))
+                        # Convert to datetime for safe comparison
+                        new_ex_exit_dt = datetime.strptime(exceptions[ex_key]["exit"], TIME_FMT)
+
+                        if new_ex_exit_dt > normal_exit:
+                            exceptions[ex_key]["exit"] = normal_exit.strftime(TIME_FMT)
+
 
             # Apply modified exception times to schedules
             for (eid, date_key), ex_vals in exceptions.items():
-                if eid == pid and date_key in schedules:
-                    schedules[date_key]["entry"] = ex_vals["entry"]
-                    schedules[date_key]["exit"] = ex_vals["exit"]
+                if eid == pid:
+                    if date_key not in schedules:
+                        schedules[date_key] = {
+                            "entry": ex_vals["entry"],
+                            "exit": ex_vals["exit"],
+                            "floating": DEFAULT_FLOATING,
+                            "late_allowed": DEFAULT_LATE_ALLOWED,
+                            "is_holiday": False
+                        }
+                    else:
+                        schedules[date_key]["entry"] = ex_vals["entry"]
+                        schedules[date_key]["exit"] = ex_vals["exit"]
         # --- Build UI ---
         self.win = Toplevel()
         self.win.title("Work Schedule Editor")
@@ -198,31 +213,32 @@ class WorkScheduleEditor:
 
     # -------------------------------------------------------------------------
     def save_schedules(self):
-        """Save all edited work schedules including holidays."""
+        """Save all edited work schedules including holidays.
+
+        Behavior:
+        - If the selected ID (pid) is an exception, only update in-memory schedules (self.app.work_schedules).
+        - Otherwise update both the DB (work_schedules table) and in-memory schedules.
+        """
+        pid = self.app.selected_id.get()
+        if not pid:
+            messagebox.showinfo("Info", "Select an ID first.")
+            return
+
         try:
             with sqlite3.connect(self.app.processor.db_path) as conn:
                 cursor = conn.cursor()
 
+                # --- Collect exception IDs from DB and normalize to 8-char strings ---
+                cursor.execute("SELECT DISTINCT id FROM exceptions")
+                exception_ids = {str(row[0]).zfill(8) for row in cursor.fetchall()}
+                is_exception_pid = pid in exception_ids
+                
                 for d, (cb_e, cb_x, cb_f, late_v, hol_v) in self.combos.items():
                     entry = cb_e.get()
                     exit = cb_x.get()
                     floating = float(cb_f.get())
                     late_allowed = int(late_v.get())
                     is_holiday = int(hol_v.get())
-
-                    # --- Insert default row if date does not exist ---
-                    cursor.execute("SELECT COUNT(*) FROM work_schedules WHERE date = ?", (d,))
-                    if cursor.fetchone()[0] == 0:
-                        cursor.execute("""
-                            INSERT INTO work_schedules (date, entry, exit, floating, late_allowed, is_holiday)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, (d, entry, exit, floating, late_allowed, is_holiday))
-                    else:
-                        cursor.execute("""
-                            UPDATE work_schedules
-                            SET entry = ?, exit = ?, floating = ?, late_allowed = ?, is_holiday = ?
-                            WHERE date = ?
-                        """, (entry, exit, floating, late_allowed, is_holiday, d))
 
                     # --- Update in-memory dictionary ---
                     self.app.work_schedules[d] = {
@@ -233,14 +249,50 @@ class WorkScheduleEditor:
                         "is_holiday": bool(is_holiday)
                     }
 
-                # --- Update global holidays list ---
-                self.app.holidays = [int(d[6:8]) for d, vals in self.app.work_schedules.items() if vals["is_holiday"]]
+                    # --- If this pid is an exception, skip DB writes for this ID (only memory updates) ---
+                    if not is_exception_pid:
+                        
+                        # --- Insert default row if date does not exist ---
+                        cursor.execute("SELECT COUNT(*) FROM work_schedules WHERE date = ?", (d,))
+                        if cursor.fetchone()[0] == 0:
+                            cursor.execute("""
+                                INSERT INTO work_schedules (date, entry, exit, floating, late_allowed, is_holiday)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (d, entry, exit, floating, late_allowed, is_holiday))
+                        else:
+                            cursor.execute("""
+                                UPDATE work_schedules
+                                SET entry = ?, exit = ?, floating = ?, late_allowed = ?, is_holiday = ?
+                                WHERE date = ?
+                            """, (entry, exit, floating, late_allowed, is_holiday, d))
 
-                conn.commit()
+                # --- Update global holidays list from in-memory schedules ---
+                try:
+                    # --- Update global holidays list and write to DB ---
+                    self.app.holidays = []
+                    for dt, vals in self.app.work_schedules.items():
+                        day = int(dt[6:8])
+                        if vals.get("is_holiday"):
+                            self.app.holidays.append(day)
 
+                        # Always update holidays in the DB
+                        cursor.execute("""
+                            UPDATE work_schedules
+                            SET is_holiday = ?
+                            WHERE date = ?
+                        """, (int(vals.get("is_holiday")), dt))
+                    # --- Commit all changes at once ---
+                    conn.commit()
+                except Exception:
+                    self.app.holidays = []
+                    
         except sqlite3.Error as e:
             messagebox.showerror("Database Error", f"Failed to save schedules:\n{e}")
             return
-
-        messagebox.showinfo("Saved", "✅ Work schedules updated successfully.")
+        # --- Different message depending on mode ---
+        if is_exception_pid:
+            msg = "✅ Exception ID detected — changes applied in memory only."
+        else:
+            msg = "✅ Work schedules updated successfully and saved to database."
+        messagebox.showinfo("Saved", msg)
         self.win.destroy()

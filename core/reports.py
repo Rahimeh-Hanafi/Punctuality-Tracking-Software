@@ -72,21 +72,26 @@ class ReportGenerator:
                         if day not in existing_days:
                             date_str = f"{ym}{day:02d}"  # e.g. 14040605
 
-                            # ✅ Try to get work schedule for this day
-                            cursor.execute("SELECT entry, exit FROM work_schedules WHERE date = ?", (date_str,))
-                            row = cursor.fetchone()
+                            # ✅ Try to get work schedule from in-memory schedules
+                            schedule = self.app.work_schedules.get(date_str)
 
-                            if row:
-                                entry_time, exit_time = row
+                            if schedule:
+                                entry_time = schedule.get("entry", getattr(self.app, "DEFAULT_ENTRY", "07:30"))
+                                exit_time = schedule.get("exit", getattr(self.app, "DEFAULT_EXIT", "16:30"))
                             else:
-                                entry_time = getattr(self.app, "DEFAULT_ENTRY", "07:30")
-                                exit_time = getattr(self.app, "DEFAULT_EXIT", "16:30")
+                                # Check for ID-based exception in the database
+                                cursor.execute(
+                                    "SELECT entry, exit FROM exceptions WHERE id = ? AND date = ?",
+                                    (pid, date_str)
+                                )
+                                ex_row = cursor.fetchone()
+                                if ex_row:
+                                    entry_time, exit_time = ex_row
+                                else:
+                                    # Fall back to defaults
+                                    entry_time = getattr(self.app, "DEFAULT_ENTRY", "07:30")
+                                    exit_time = getattr(self.app, "DEFAULT_EXIT", "16:30")
 
-                            # ✅ Check for ID-based exception
-                            cursor.execute("SELECT entry, exit FROM exceptions WHERE id = ? AND date = ?", (pid, date_str))
-                            ex_row = cursor.fetchone()
-                            if ex_row:
-                                entry_time, exit_time = ex_row
                             entry_dt = datetime.strptime(entry_time, "%H:%M")
                             exit_dt = datetime.strptime(exit_time, "%H:%M")
                             duration_minutes = int((exit_dt - entry_dt).total_seconds() // 60)

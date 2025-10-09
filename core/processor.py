@@ -459,47 +459,45 @@ class LogProcessor:
                 entry_dt = datetime.strptime(entry_str, "%H:%M")
                 exit_dt = datetime.strptime(exit_str, "%H:%M")
             except ValueError:
-                continue  # Skip invalid entries
+                messagebox.showwarning("Invalid Time", f"Skipping session for {pid_s} on {date}: {entry_str}, {exit_str}")
+                continue
+           
+            # --- Step 5: Fetch scheduled times from in-memory schedules first ---
+            schedule = getattr(self.app, "work_schedules", {}).get(date)
 
-            # --- Step 5: Fetch scheduled times from work_schedules table ---
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT entry, exit, floating, late_allowed
-                    FROM work_schedules
-                    WHERE date = ?
-                """, (date,))
-                sched = cursor.fetchone()
-
-            if sched:
-                scheduled_entry_str, scheduled_exit_str, floating, late_allowed = sched
+            if schedule:
+                scheduled_entry_str = schedule.get("entry", getattr(self.app, "DEFAULT_ENTRY", "07:30"))
+                scheduled_exit_str = schedule.get("exit", getattr(self.app, "DEFAULT_EXIT", "16:30"))
+                floating = schedule.get("floating", getattr(self.app, "DEFAULT_FLOATING", 1.0))
+                late_allowed = schedule.get("late_allowed", getattr(self.app, "DEFAULT_LATE_ALLOWED", 0))
             else:
-                # Fallback to defaults if schedule missing
-                scheduled_entry_str = DEFAULT_ENTRY
-                scheduled_exit_str = DEFAULT_EXIT
-                floating = DEFAULT_FLOATING
-                late_allowed = DEFAULT_LATE_ALLOWED
-
-            # --- Step 6: Check for ID-specific exceptions ---
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+                # --- Schedule missing in memory: check ID-specific exceptions in DB ---
                 cursor.execute("SELECT entry, exit FROM exceptions WHERE id = ? AND date = ?", (pid_s, date))
-                ex = cursor.fetchone()
-            if ex:
-                scheduled_entry_str, scheduled_exit_str = ex
+                ex_row = cursor.fetchone()
 
-            # --- Step 7: Convert schedule strings to datetime objects ---
+                if ex_row:
+                    scheduled_entry_str, scheduled_exit_str = ex_row
+                    floating = getattr(self.app, "DEFAULT_FLOATING", 1.0)
+                    late_allowed = getattr(self.app, "DEFAULT_LATE_ALLOWED", 0)
+                else:
+                    # --- Fallback to defaults ---
+                    scheduled_entry_str = getattr(self.app, "DEFAULT_ENTRY", "07:30")
+                    scheduled_exit_str = getattr(self.app, "DEFAULT_EXIT", "16:30")
+                    floating = getattr(self.app, "DEFAULT_FLOATING", 1.0)
+                    late_allowed = getattr(self.app, "DEFAULT_LATE_ALLOWED", 0)
+
+            # --- Step 6: Convert schedule strings to datetime objects ---
             scheduled_entry = datetime.strptime(scheduled_entry_str, "%H:%M")
             scheduled_exit = datetime.strptime(scheduled_exit_str, "%H:%M")
             float_minutes = int(float(floating) * 60)
 
-            # --- Step 8: Calculate allowed entry window ---
+            # --- Step 7: Calculate allowed entry window ---
             if late_allowed:
                 latest_allowed_entry = scheduled_entry + timedelta(minutes=10 + float_minutes)
             else:
                 latest_allowed_entry = scheduled_entry + timedelta(minutes=float_minutes)
 
-            # --- Step 9: Check Late Entry ---
+            # --- Step 8: Check Late Entry ---
             if entry_dt > latest_allowed_entry:
                 minutes_late = int((entry_dt - latest_allowed_entry).total_seconds() // 60)
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
@@ -509,7 +507,7 @@ class LogProcessor:
                 delta_entry = entry_dt - scheduled_entry
                 allowed_exit = scheduled_exit + delta_entry
 
-            # --- Step 10: Check Early Exit ---
+            # --- Step 9: Check Early Exit ---
             if exit_dt < allowed_exit:
                 minutes_early = int((allowed_exit - exit_dt).total_seconds() // 60)
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
