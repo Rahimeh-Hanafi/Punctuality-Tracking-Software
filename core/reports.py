@@ -83,7 +83,7 @@ class ReportGenerator:
                                 exit_time = getattr(self.app, "DEFAULT_EXIT", "16:30")
 
                             # ✅ Check for ID-based exception
-                            cursor.execute("SELECT entry, exit FROM exceptions WHERE id = ?", (pid,))
+                            cursor.execute("SELECT entry, exit FROM exceptions WHERE id = ? AND date = ?", (pid, date_str))
                             ex_row = cursor.fetchone()
                             if ex_row:
                                 entry_time, exit_time = ex_row
@@ -192,9 +192,9 @@ class ReportGenerator:
                 return
             
             # Calculate totals for each reason
-            total_impermissible = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Impermissible")
-            total_announced = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Announced")
-            total_other = sum(minutes for var, minutes, *_ in reason_vars if var.get() == "Other")
+            total_impermissible = sum(minutes or 0 for var, minutes, *_ in reason_vars if var.get() == "Impermissible")
+            total_announced = sum(minutes or 0 for var, minutes, *_ in reason_vars if var.get() == "Announced")
+            total_other = sum(minutes or 0 for var, minutes, *_ in reason_vars if var.get() == "Other")
            
             # Prepare rows with extra columns for totals
             rows = [

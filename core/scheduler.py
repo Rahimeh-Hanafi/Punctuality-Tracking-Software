@@ -1,10 +1,13 @@
 import sqlite3
+from datetime import datetime, timedelta
 from tkinter import (
     Toplevel, Label, Frame, Button, Canvas, Scrollbar, VERTICAL,
     BooleanVar, Checkbutton, messagebox
 )
 from tkinter.ttk import Combobox
 from resources.config import DEFAULT_ENTRY, DEFAULT_EXIT, DEFAULT_FLOATING, DEFAULT_LATE_ALLOWED
+
+TIME_FMT = "%H:%M"
 
 class WorkScheduleEditor:
     def __init__(self, app):
@@ -47,19 +50,59 @@ class WorkScheduleEditor:
                     } for row in cursor.fetchall()
                 }
 
-                cursor.execute("SELECT id, entry, exit FROM exceptions")
-                exceptions = {str(r[0]): {"entry": r[1], "exit": r[2]} for r in cursor.fetchall()}
+                cursor.execute("SELECT id, date, entry, exit FROM exceptions")
+                exceptions = {(str(r[0]), r[1]): {"entry": r[2], "exit": r[3]} for r in cursor.fetchall()}
 
         except sqlite3.Error as e:
             messagebox.showerror("Database Error", f"Failed to load schedules or exceptions:\n{e}")
             return
 
-        # --- Apply per-ID exception ---
-        if pid in exceptions:
-            for d in schedules:
-                schedules[d]["entry"] = exceptions[pid]["entry"]
-                schedules[d]["exit"] = exceptions[pid]["exit"]
+        # --- Adaptive Exception Logic ---
+        if any(key[0] == pid for key in exceptions):
 
+            default_entry_dt = datetime.strptime(DEFAULT_ENTRY, TIME_FMT)
+            default_exit_dt = datetime.strptime(DEFAULT_EXIT, TIME_FMT)
+            default_work_duration = default_exit_dt - default_entry_dt
+
+
+            for date_key, sched in schedules.items():       
+                ex_key = (pid, date_key)
+                if ex_key not in exceptions:
+                    continue  # no exception for this date
+
+                ex_entry = datetime.strptime(exceptions[ex_key]["entry"], TIME_FMT)
+                ex_exit = datetime.strptime(exceptions[ex_key]["exit"], TIME_FMT)
+                ex_work_duration = ex_exit - ex_entry
+                normal_entry = datetime.strptime(sched["entry"], TIME_FMT)
+                normal_exit = datetime.strptime(sched["exit"], TIME_FMT)
+
+                # Case 1: Exit differs from default
+                if sched["exit"] != DEFAULT_EXIT:
+                    if ex_exit >= normal_exit:
+                        # If overlapping → align exception with normal
+                        exceptions[ex_key]["entry"] = sched["entry"]
+                        exceptions[ex_key]["exit"] = sched["exit"]
+                    # else: no overlap → do nothing
+
+                # Case 2: Entry differs from default
+                elif sched["entry"] != DEFAULT_ENTRY:
+                    # Compute working durations
+                    normal_work_duration = normal_exit - normal_entry
+                    # If exception range fits inside new normal range → do nothing
+                    if ex_entry >= normal_entry and ex_exit <= normal_exit:
+                        continue
+                    else:
+                        # Otherwise, adjust exception schedule proportionally
+                        ratio = normal_work_duration.total_seconds() / default_work_duration.total_seconds()
+                        new_exit = normal_entry + timedelta(seconds=ex_work_duration.total_seconds() * ratio)
+                        exceptions[ex_key]["entry"] = normal_entry.strftime(TIME_FMT)
+                        exceptions[ex_key]["exit"] = self.round_to_half_hour(new_exit.strftime(TIME_FMT))
+
+            # Apply modified exception times to schedules
+            for (eid, date_key), ex_vals in exceptions.items():
+                if eid == pid and date_key in schedules:
+                    schedules[date_key]["entry"] = ex_vals["entry"]
+                    schedules[date_key]["exit"] = ex_vals["exit"]
         # --- Build UI ---
         self.win = Toplevel()
         self.win.title("Work Schedule Editor")
@@ -121,6 +164,19 @@ class WorkScheduleEditor:
         Button(content_frame, text="Save All", command=self.save_schedules).pack(pady=10)
 
     # -------------------------------------------------------------------------
+    def round_to_half_hour(self, time_str):
+        """Round a 'HH:MM' time string to nearest :00 or :30."""
+        t = datetime.strptime(time_str, "%H:%M")
+        minutes = t.minute
+        if minutes < 15:
+            t = t.replace(minute=0)
+        elif minutes < 45:
+            t = t.replace(minute=30)
+        else:
+            t = (t + timedelta(hours=1)).replace(minute=0)
+        return t.strftime("%H:%M")
+    # -------------------------------------------------------------------------
+
     def ensure_default_schedules(self, db_path, year, month, days_in_month):
         """Ensure work_schedules table has default entries for given month."""
         try:

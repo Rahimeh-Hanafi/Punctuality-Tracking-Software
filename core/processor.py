@@ -13,8 +13,7 @@ class LogProcessor:
         self.work_schedules = {} 
         self.exceptions = {}
         self.db_path = db_path
-        self._init_db()                       
-        self.load_exceptions_from_config()    # Always constant        
+        self._init_db()                              
 
     def _init_db(self):
         """Initialize SQLite DB and sessions table."""
@@ -50,27 +49,49 @@ class LogProcessor:
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS exceptions (
-                    id TEXT PRIMARY KEY,
+                    id TEXT,
+                    date TEXT,
                     entry TEXT,
-                    exit TEXT
+                    exit TEXT,
+                    PRIMARY KEY (id, date)
                 )
             """)
             conn.commit()
-    def load_exceptions_from_config(self):
-        """Read constant exceptions from config.py and insert into DB."""
+    def load_exceptions_from_config(self, month_in_file):
+        """
+        Read constant exceptions from config.py, expand them by all days in the given month,
+        and insert into the database.
+        """
         self.exceptions.clear()
+        if not month_in_file:
+            return
 
-        # Convert to dictionary in memory
-        self.exceptions = {e["id"]: (e["entry"], e["exit"]) for e in EXCEPTIONS}
-
-        # 🔹 Insert into database
+        year = int(month_in_file[:4])
+        month = int(month_in_file[4:6])
+        # --- Determine number of days in month (Jalali logic simplified) ---
+        if 1 <= month <= 6:
+            days_in_month = 31
+        elif 7 <= month <= 12:
+            days_in_month = 30
+        else:
+            days_in_month = 31  
+        # --- Build and insert defaults ---
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            for pid, (entry, exit_) in self.exceptions.items():
-                cursor.execute("""
-                    INSERT OR REPLACE INTO exceptions (id, entry, exit)
-                    VALUES (?, ?, ?)
-                """, (pid, entry, exit_))
+            for e in EXCEPTIONS:
+                pid = str(e["id"]).zfill(8)
+                for day in range(1, days_in_month + 1):
+                    date_str = f"{year:04d}{month:02d}{day:02d}"
+                    entry, exit_ = e["entry"], e["exit"]
+
+                    # Store in memory too
+                    self.exceptions[(pid, date_str)] = (entry, exit_)
+
+                    # Insert into database
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO exceptions (id, date, entry, exit)
+                        VALUES (?, ?, ?, ?)
+                    """, (pid, date_str, entry, exit_))
             conn.commit()
 
     def _build_and_save_schedules_to_db(self, month_in_file: str):
@@ -269,6 +290,7 @@ class LogProcessor:
             )
             self._load_sessions_from_db()
             self._load_schedules_from_db(month_in_file)
+            self.load_exceptions_from_config(month_in_file)    
             self.app._refresh_id_menu()
             return
         # --- Step 4: Otherwise, parse TXT normally and save to DB ---
@@ -287,6 +309,7 @@ class LogProcessor:
         self._build_sessions()
         self._save_sessions_to_db()
         self._build_and_save_schedules_to_db(month_in_file)
+        self.load_exceptions_from_config(month_in_file) 
 
     def _build_sessions(self):
         """Convert raw records into sessions."""
@@ -460,7 +483,7 @@ class LogProcessor:
             # --- Step 6: Check for ID-specific exceptions ---
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT entry, exit FROM exceptions WHERE id = ?", (pid,))
+                cursor.execute("SELECT entry, exit FROM exceptions WHERE id = ? AND date = ?", (pid_s, date))
                 ex = cursor.fetchone()
             if ex:
                 scheduled_entry_str, scheduled_exit_str = ex
@@ -478,7 +501,7 @@ class LogProcessor:
 
             # --- Step 9: Check Late Entry ---
             if entry_dt > latest_allowed_entry:
-                minutes_late = (entry_dt - latest_allowed_entry).seconds // 60
+                minutes_late = int((entry_dt - latest_allowed_entry).total_seconds() // 60)
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
                 allowed_exit = scheduled_exit + timedelta(minutes=float_minutes)
             else:
@@ -488,7 +511,7 @@ class LogProcessor:
 
             # --- Step 10: Check Early Exit ---
             if exit_dt < allowed_exit:
-                minutes_early = (allowed_exit - exit_dt).seconds // 60
+                minutes_early = int((allowed_exit - exit_dt).total_seconds() // 60)
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_early, "Early Exit"))
 
         return results
