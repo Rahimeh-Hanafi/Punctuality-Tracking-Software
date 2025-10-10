@@ -85,14 +85,11 @@ class WorkScheduleEditor:
                     # else: no overlap → do nothing
 
                 # Case 2: Entry differs from default
-                elif sched["entry"] != DEFAULT_ENTRY:
+                if sched["entry"] != DEFAULT_ENTRY:
                     # Compute working durations
                     normal_work_duration = normal_exit - normal_entry
                     # If exception range fits inside new normal range → do nothing
-                    if ex_entry >= normal_entry and ex_exit <= normal_exit:
-                        continue
-                    else:
-                        # Otherwise, adjust exception schedule proportionally
+                    if not(ex_entry >= normal_entry and ex_exit <= normal_exit):
                         ratio = normal_work_duration.total_seconds() / default_work_duration.total_seconds()
                         new_exit = normal_entry + timedelta(seconds=ex_work_duration.total_seconds() * ratio)
                         exceptions[ex_key]["entry"] = normal_entry.strftime(TIME_FMT)
