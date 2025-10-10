@@ -34,11 +34,12 @@ class ReportGenerator:
                 months = [row[0] for row in cursor.fetchall()]
 
                 for ym in months:  # e.g. "140406"  
-                    cursor.execute("""
-                        SELECT date FROM work_schedules 
-                        WHERE is_holiday = 1 AND substr(date,1,6) = ?
-                    """, (ym,))
-                    holidays = [int(date[6:8]) for (date,) in cursor.fetchall()]                            
+                    # Read holidays directly from in-memory schedules
+                    holidays = [
+                        int(date_key[6:8])
+                        for date_key, info in self.app.work_schedules.items()
+                        if info.get("is_holiday") and date_key.startswith(ym)
+                    ]                                            
                     m = int(ym[4:6]) 
 
                     if 7 <= m <= 12:
