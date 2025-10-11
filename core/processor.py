@@ -503,6 +503,8 @@ class LogProcessor:
                 results.append((pid_s, date, entry_str, exit_str, status, minutes_late, "Late Entry"))
                 allowed_exit = scheduled_exit + timedelta(minutes=float_minutes)
             else:
+                if entry_dt <= scheduled_entry:
+                    entry_dt = scheduled_entry
                 # Allowed entry → allowed exit is extended by difference between actual and scheduled entry
                 delta_entry = entry_dt - scheduled_entry
                 allowed_exit = scheduled_exit + delta_entry
